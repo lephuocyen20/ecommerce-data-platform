@@ -159,7 +159,7 @@ if __name__ == "__main__":
     with closing(get_db_connection()) as connection, connection:
         with connection.cursor() as db_cursor:
             # Uncomment the generator you want to run.
-            generate_customers(db_cursor, 10)
+            #generate_customers(db_cursor, 10)
             # generate_products(db_cursor, 10)
             # generate_orders(db_cursor, 10)
             # generate_order_items(db_cursor, 10)
