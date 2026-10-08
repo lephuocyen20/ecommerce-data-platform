@@ -52,3 +52,33 @@ INSERT INTO shipments (shipment_id, order_id, carrier, tracking_number, shipping
 INSERT INTO shipments (shipment_id, order_id, carrier, tracking_number, shipping_address, shipping_fee, status, shipped_at, delivered_at, estimated_delivery_at, created_at, updated_at) VALUES (0000002, 0000003, 'GHTK', 'GHTK202609280003', '45 Le Loi, Hai Chau, Da Nang', 25000, 'IN_TRANSIT', '2026-09-28 10:15:00', NULL, '2026-09-30 18:00:00', '2026-09-28 10:00:00', '2026-09-28 14:00:00');
 INSERT INTO shipments (shipment_id, order_id, carrier, tracking_number, shipping_address, shipping_fee, status, shipped_at, delivered_at, estimated_delivery_at, created_at, updated_at) VALUES (0000003, 0000004, 'Viettel Post', 'VTP202609280004', '78 Vo Van Tan, District 3, Ho Chi Minh City', 35000, 'OUT_FOR_DELIVERY', '2026-09-28 08:45:00', NULL, '2026-09-29 18:00:00', '2026-09-28 08:30:00', '2026-09-29 08:00:00');
 INSERT INTO shipments (shipment_id, order_id, carrier, tracking_number, shipping_address, shipping_fee, status, shipped_at, delivered_at, estimated_delivery_at, created_at, updated_at) VALUES (0000004, 0000005, 'J&T Express', 'JNT202609280005', '12 Tran Phu, Ngo Quyen, Hai Phong', 30000, 'DELIVERED', '2026-09-28 11:00:00', '2026-09-29 15:20:00', '2026-09-29 18:00:00', '2026-09-28 10:45:00', '2026-09-29 15:20:00');
+
+SELECT setval(
+    pg_get_serial_sequence('customers', 'customer_id'),
+    (SELECT MAX(customer_id) FROM customers)
+);
+
+SELECT setval(
+    pg_get_serial_sequence('products', 'product_id'),
+    (SELECT MAX(product_id) FROM products)
+);
+
+SELECT setval(
+    pg_get_serial_sequence('orders', 'order_id'),
+    (SELECT MAX(order_id) FROM orders)
+);
+
+SELECT setval(
+    pg_get_serial_sequence('order_items', 'order_item_id'),
+    (SELECT MAX(order_item_id) FROM order_items)
+);
+
+SELECT setval(
+    pg_get_serial_sequence('payments', 'payment_id'),
+    (SELECT MAX(payment_id) FROM payments)
+);
+
+SELECT setval(
+    pg_get_serial_sequence('shipments', 'shipment_id'),
+    (SELECT MAX(shipment_id) FROM shipments)
+);
