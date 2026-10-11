@@ -1,0 +1,128 @@
+tables:
+  customers:
+    schema:
+      customer_id: bigint
+      full_name: string
+      email: string
+      created_at: timestamp
+      updated_at: timestamp
+    primary_key: customer_id
+    not_null:
+      - customer_id
+      - email
+    unique:
+      - email
+
+  products:
+    schema:
+      product_id: bigint
+      product_name: string
+      stock_quantity: int
+      price: decimal(12,2)
+      created_at: timestamp
+      updated_at: timestamp
+    primary_key: product_id
+    not_null:
+      - product_id
+      - product_name
+      - price
+    positive:
+      - price
+    non_negative:
+      - stock_quantity
+
+  orders:
+    schema:
+      order_id: bigint
+      customer_id: bigint
+      status: string
+      order_date: timestamp
+      updated_at: timestamp
+    primary_key: order_id
+    not_null:
+      - order_id
+      - customer_id
+    foreign_keys:
+      - column: customer_id
+        references:
+          table: customers
+          column: customer_id
+
+  order_items:
+    schema:
+      order_item_id: bigint
+      order_id: bigint
+      product_id: bigint
+      quantity: int
+      unit_price: decimal(12,2)
+      discount_amount: decimal(12,2)
+    primary_key: order_item_id
+    not_null:
+      - order_item_id
+      - order_id
+      - product_id
+    positive:
+      - quantity
+      - unit_price
+    non_negative:
+      - discount_amount
+    foreign_keys:
+      - column: order_id
+        references:
+          table: orders
+          column: order_id
+      - column: product_id
+        references:
+          table: products
+          column: product_id
+
+  payments:
+    schema:
+      payment_id: bigint
+      order_id: bigint
+      amount: decimal(12,2)
+      payment_method: string
+      status: string
+      transaction_id: string
+      created_at: timestamp
+    primary_key: payment_id
+    not_null:
+      - payment_id
+      - order_id
+    positive:
+      - amount
+    unique:
+      - transaction_id # NULL hợp lệ, chỉ unique với giá trị khác NULL
+    foreign_keys:
+      - column: order_id
+        references:
+          table: orders
+          column: order_id
+
+  shipments:
+    schema:
+      shipment_id: bigint
+      order_id: bigint
+      carrier: string
+      tracking_number: string
+      shipping_address: string
+      shipping_fee: decimal(12,2)
+      status: string
+      shipped_at: timestamp
+      delivered_at: timestamp
+      estimated_delivery_at: timestamp
+      created_at: timestamp
+      updated_at: timestamp
+    primary_key: shipment_id
+    not_null:
+      - shipment_id
+      - order_id
+    non_negative:
+      - shipping_fee
+    unique:
+      - tracking_number # NULL hợp lệ, chỉ unique với giá trị khác NULL
+    foreign_keys:
+      - column: order_id
+        references:
+          table: orders
+          column: order_id
