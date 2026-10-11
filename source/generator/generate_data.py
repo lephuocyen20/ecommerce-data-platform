@@ -7,7 +7,6 @@ import psycopg2
 from dotenv import load_dotenv
 from faker import Faker
 
-
 load_dotenv()
 fake = Faker("vi_VN")
 
@@ -39,8 +38,11 @@ def generate_customers(cursor, n):
 
 def generate_products(cursor, n):
     products = [
-        (f"Product {random.randint(100, 999)}", random.randint(0, 100),
-         random.randint(100_000, 30_000_000))
+        (
+            f"Product {random.randint(100, 999)}",
+            random.randint(0, 100),
+            random.randint(100_000, 30_000_000),
+        )
         for _ in range(n)
     ]
     cursor.executemany(
@@ -56,7 +58,14 @@ def generate_orders(cursor, n):
         print("Khong co customer nao trong database.")
         return
 
-    statuses = ["PENDING", "CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"]
+    statuses = [
+        "PENDING",
+        "CONFIRMED",
+        "PROCESSING",
+        "SHIPPED",
+        "DELIVERED",
+        "CANCELLED",
+    ]
     orders = [(random.choice(customer_ids), random.choice(statuses)) for _ in range(n)]
     cursor.executemany(
         "INSERT INTO orders (customer_id, status) VALUES (%s, %s)", orders
@@ -66,7 +75,9 @@ def generate_orders(cursor, n):
 def generate_order_items(cursor, n):
     cursor.execute("SELECT order_id FROM orders")
     order_ids = [row[0] for row in cursor.fetchall()]
-    cursor.execute("SELECT product_id, stock_quantity, price FROM products WHERE stock_quantity > 0")
+    cursor.execute(
+        "SELECT product_id, stock_quantity, price FROM products WHERE stock_quantity > 0"
+    )
     products = cursor.fetchall()
     if not order_ids or not products:
         print("Can co order va product con hang de tao order item.")
@@ -75,10 +86,15 @@ def generate_order_items(cursor, n):
     order_items = []
     for _ in range(n):
         product_id, stock_quantity, price = random.choice(products)
-        order_items.append((
-            random.choice(order_ids), product_id,
-            random.randint(1, min(5, stock_quantity)), price, 0,
-        ))
+        order_items.append(
+            (
+                random.choice(order_ids),
+                product_id,
+                random.randint(1, min(5, stock_quantity)),
+                price,
+                0,
+            )
+        )
     cursor.executemany(
         """INSERT INTO order_items
            (order_id, product_id, quantity, unit_price, discount_amount)
@@ -102,11 +118,15 @@ def generate_payments(cursor, n):
     payments = []
     for _ in range(n):
         order_id, total_amount = random.choice(orders_with_total)
-        payments.append((
-            order_id, total_amount,
-            random.choice(["COD", "BANK_TRANSFER", "CREDIT_CARD", "E_WALLET"]),
-            random.choice(["PENDING", "SUCCESS", "FAILED"]), str(uuid.uuid4()),
-        ))
+        payments.append(
+            (
+                order_id,
+                total_amount,
+                random.choice(["COD", "BANK_TRANSFER", "CREDIT_CARD", "E_WALLET"]),
+                random.choice(["PENDING", "SUCCESS", "FAILED"]),
+                str(uuid.uuid4()),
+            )
+        )
     cursor.executemany(
         """INSERT INTO payments
            (order_id, amount, payment_method, status, transaction_id)
@@ -134,11 +154,16 @@ def generate_shipments(cursor, n):
         "SHIPPED": ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY"],
         "DELIVERED": ["DELIVERED"],
     }
-    selected_orders = random.sample(orders_for_shipping, min(n, len(orders_for_shipping)))
+    selected_orders = random.sample(
+        orders_for_shipping, min(n, len(orders_for_shipping))
+    )
     shipments = [
         (
-            order_id, random.choice(["GHN", "GHTK", "Viettel Post"]),
-            str(uuid.uuid4()), fake.address(), random.randint(15_000, 50_000),
+            order_id,
+            random.choice(["GHN", "GHTK", "Viettel Post"]),
+            str(uuid.uuid4()),
+            fake.address(),
+            random.randint(15_000, 50_000),
             random.choice(shipment_status_map[order_status]),
         )
         for order_id, order_status in selected_orders
@@ -152,14 +177,11 @@ def generate_shipments(cursor, n):
     )
 
 
-
-
-
 if __name__ == "__main__":
     with closing(get_db_connection()) as connection, connection:
         with connection.cursor() as db_cursor:
             # Uncomment the generator you want to run.
-            #generate_customers(db_cursor, 10)
+            # generate_customers(db_cursor, 10)
             # generate_products(db_cursor, 10)
             # generate_orders(db_cursor, 10)
             # generate_order_items(db_cursor, 10)
