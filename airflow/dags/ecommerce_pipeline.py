@@ -2,6 +2,11 @@
 from datetime import datetime, timedelta
 import logging
 import os
+import io
+import json
+
+from airflow.sdk import get_current_context
+from minio import Minio
 
 from airflow.sdk import dag, task
 from airflow.providers.docker.operators.docker import DockerOperator
@@ -21,6 +26,7 @@ SPARK_IMAGE = "ecommerce-spark:3.5.6"
 DOCKER_NETWORK = "ecommerce-data-platform_default"
 
 PROJECT_PATH = "C:\\Users\\HITLAB\\Projects\\ecommerce-data-platform"
+BRONZE_BUCKET = os.environ["BRONZE_BUCKET"]
 
 
 @dag(
@@ -33,6 +39,7 @@ PROJECT_PATH = "C:\\Users\\HITLAB\\Projects\\ecommerce-data-platform"
         "retry_delay": timedelta(minutes=1),
     },
     tags=["ecommerce", "data-engineering"],
+    max_active_runs=1
 )
 def ecommerce_pipeline():
 
@@ -65,6 +72,42 @@ def ecommerce_pipeline():
 
         return object_name
 
+    @task
+    def create_batch_manifest(bronze_objects):
+        import io
+        import json
+
+        from airflow.sdk import get_current_context
+        from minio import Minio
+
+        context = get_current_context()
+        run_id = context["run_id"]
+
+        manifest = {
+            "run_id": run_id,
+            "tables": bronze_objects,
+        }
+
+        content = json.dumps(manifest).encode("utf-8")
+
+        client = Minio(
+            "minio:9000",
+            access_key=os.environ["MINIO_ACCESS_KEY"],
+            secret_key=os.environ["MINIO_SECRET_KEY"],
+            secure=False,
+        )
+
+        manifest_key = f"manifests/{run_id}/bronze.json"
+
+        client.put_object(
+            BRONZE_BUCKET,
+            manifest_key,
+            io.BytesIO(content),
+            length=len(content),
+            content_type="application/json",
+        )
+
+        return manifest_key
     # ==========================================
     # 2. Bronze Data Quality
     # ==========================================
@@ -85,11 +128,12 @@ def ecommerce_pipeline():
             object_name,
         )
 
-        validate_table(table_name)
+        validate_table(table_name, object_name)
 
         logger.info(
-            "Validation completed | table=%s",
+            "Validation completed | table=%s ",
             table_name,
+
         )
 
     # ==========================================
@@ -112,6 +156,8 @@ def ecommerce_pipeline():
 
         bronze_validation_tasks.append(validation_task)
 
+    manifest_task = create_batch_manifest(bronze_objects)
+
     # ==========================================
     # 4. Spark: Bronze -> Silver
     # ==========================================
@@ -123,6 +169,7 @@ def ecommerce_pipeline():
         private_environment={
             "MINIO_ACCESS_KEY": os.environ["MINIO_ACCESS_KEY"],
             "MINIO_SECRET_KEY": os.environ["MINIO_SECRET_KEY"],
+            "BRONZE_BUCKET": BRONZE_BUCKET,
             "PYTHONPATH": (
                 "/opt/spark/work-dir:"
                 "/opt/spark/work-dir/transformation"
@@ -131,6 +178,8 @@ def ecommerce_pipeline():
         command=[
             "/opt/spark/bin/spark-submit",
             "/opt/spark/work-dir/transformation/bronze_to_silver.py",
+            "--manifest-key",
+            "{{ ti.xcom_pull(task_ids='create_batch_manifest') }}",
         ],
         mounts=[
             Mount(
@@ -155,6 +204,7 @@ def ecommerce_pipeline():
         private_environment={
             "MINIO_ACCESS_KEY": os.environ["MINIO_ACCESS_KEY"],
             "MINIO_SECRET_KEY": os.environ["MINIO_SECRET_KEY"],
+            "BRONZE_BUCKET": BRONZE_BUCKET,
             "PYTHONPATH": (
                 "/opt/spark/work-dir:"
                 "/opt/spark/work-dir/transformation"
@@ -186,7 +236,8 @@ def ecommerce_pipeline():
     # 6. Pipeline dependencies
     # ==========================================
 
-    bronze_validation_tasks >> bronze_to_silver
+    bronze_validation_tasks >> manifest_task
+    manifest_task >> bronze_to_silver
     bronze_to_silver >> validate_silver
 
 

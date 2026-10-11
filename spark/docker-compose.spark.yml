@@ -7,6 +7,7 @@ services:
     environment:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      BRONZE_BUCKET: ${BRONZE_BUCKET}
     container_name: ecommerce-spark
     command: sleep infinity
     env_file:

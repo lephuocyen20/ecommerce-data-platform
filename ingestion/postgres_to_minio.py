@@ -75,7 +75,7 @@ def upload_to_minio(client, table_name, csv_content):
     """Upload CSV content to the Bronze layer in MinIO."""
     validate_table_name(table_name)
 
-    bucket_name = "ecommerce-data-lake"
+    bucket_name = os.environ["BRONZE_BUCKET"]
     extract_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     object_name = (
         f"bronze/{table_name}/extract_date={extract_timestamp[:8]}/"

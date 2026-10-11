@@ -1,4 +1,8 @@
+from email import parser
 import os
+import argparse
+import json
+
 
 from minio import Minio
 from pyspark.sql import SparkSession
@@ -49,18 +53,35 @@ def read_bronze(spark, bronze_path):
     """Read and return the Bronze customers CSV DataFrame."""
     return spark.read.option("header", "true").csv(bronze_path)
 
+def load_manifest(client, bucket_name, manifest_key):
+    response = client.get_object(bucket_name, manifest_key)
+
+    try:
+        manifest = json.loads(response.read().decode("utf-8"))
+    finally:
+        response.close()
+        response.release_conn()
+
+    if "tables" not in manifest:
+        raise ValueError("Invalid manifest: missing 'tables'.")
+
+    return manifest["tables"]
 
 def write_silver(df, silver_path):
     # Write Silver Parquet
     df.write.mode("overwrite").parquet(silver_path)
 
+def process_table(spark, bucket_name, table, object_name, transform_function):
+    expected_prefix = f"bronze/{table}/"
 
-def process_table(spark, client, bucket_name, table, transform_function):
-    """Process a table from Bronze to Silver."""
-    latest_bronze_path = get_latest_bronze_path(client, bucket_name, table)
-    print(f"Latest Bronze for {table}: {latest_bronze_path}")
+    if not object_name.startswith(expected_prefix) or not object_name.endswith(".csv"):
+        raise ValueError(f"Invalid Bronze object for {table}: {object_name}")
 
-    bronze_df = read_bronze(spark, latest_bronze_path)
+    bronze_path = f"s3a://{bucket_name}/{object_name}"
+
+    print(f"Bronze snapshot for {table}: {bronze_path}")
+
+    bronze_df = read_bronze(spark, bronze_path)
     silver_df = transform_function(bronze_df)
 
     silver_path = f"s3a://{bucket_name}/silver/{table}/"
@@ -71,8 +92,21 @@ def process_table(spark, client, bucket_name, table, transform_function):
     print(f"Silver records for {table} after read: {silver_read_df.count()}")
     silver_read_df.printSchema()
 
+TRANSFORMS = {
+            "customers": transform_customers,
+            "products": transform_products,
+            "orders": transform_orders,
+            "order_items": transform_order_items,
+            "payments": transform_payments,
+            "shipments": transform_shipments,
+            }
+
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--manifest-key", required=True)
+    args = parser.parse_args()
+
     spark = (
         SparkSession.builder.master("local[2]").appName("BronzeToSilver").getOrCreate()
     )
@@ -89,14 +123,24 @@ def main():
             secure=False,
         )
 
-        process_table(spark, client, BRONZE_BUCKET, "customers", transform_customers)
-        process_table(spark, client, BRONZE_BUCKET, "products", transform_products)
-        process_table(spark, client, BRONZE_BUCKET, "orders", transform_orders)
-        process_table(
-            spark, client, BRONZE_BUCKET, "order_items", transform_order_items
+        manifest = load_manifest(
+            client,
+            BRONZE_BUCKET,
+            args.manifest_key,
         )
-        process_table(spark, client, BRONZE_BUCKET, "payments", transform_payments)
-        process_table(spark, client, BRONZE_BUCKET, "shipments", transform_shipments)
+
+        if set(manifest) != set(TRANSFORMS):
+            raise ValueError("Manifest tables do not match expected tables.")
+
+        for table, transform_function in TRANSFORMS.items():
+            process_table(
+                spark,
+                BRONZE_BUCKET,
+                table,
+                manifest[table],
+                transform_function,
+            )
+
     finally:
         spark.stop()
 

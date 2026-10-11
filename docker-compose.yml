@@ -18,6 +18,7 @@ x-airflow-common: &airflow-common
     MINIO_ENDPOINT: minio:9000
     MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
     MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    BRONZE_BUCKET: ${BRONZE_BUCKET}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
