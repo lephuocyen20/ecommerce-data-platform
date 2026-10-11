@@ -1,0 +1,23 @@
+services:
+  spark:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ecommerce-spark:3.5.6
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    container_name: ecommerce-spark
+    command: sleep infinity
+    env_file:
+      - ../.env
+    volumes:
+      - ../transformation:/opt/spark/work-dir/transformation
+      - ../validation:/opt/spark/work-dir/validation
+    networks:
+      - ecommerce-network
+
+networks:
+  ecommerce-network:
+    external: true
+    name: ecommerce-data-platform_default
