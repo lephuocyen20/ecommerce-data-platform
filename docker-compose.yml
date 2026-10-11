@@ -1,3 +1,30 @@
+x-airflow-common: &airflow-common
+  image: ecommerce-airflow:3.1.7
+  user: "${AIRFLOW_UID:-50000}:0"
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@${AIRFLOW_DB_HOST}:${AIRFLOW_DB_PORT}/${AIRFLOW_DB_NAME}
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
+    AIRFLOW__API_AUTH__JWT_SECRET: abcea1d7e055fb8b8a2704e86bd38c178166e47b3e1fe059d37f345af5619f5a
+
+    DB_HOST: postgres
+    DB_PORT: "5432"
+    DB_NAME: ecommerce
+    DB_USER: ecommerce_user
+    DB_PASSWORD: ecommerce_pass
+
+    MINIO_ENDPOINT: minio:9000
+    MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+    MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./ingestion:/opt/airflow/project/ingestion
+    - ./validation:/opt/airflow/project/validation
+    - ./source:/opt/airflow/project/source
 services:
   postgres:
     image: postgres:16
@@ -13,5 +40,51 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./source/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
 
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    container_name: ecommerce-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+  airflow-init:
+    <<: *airflow-common
+    command: db migrate
+    depends_on:
+      - postgres
+
+  airflow-api-server:
+    <<: *airflow-common
+    command: api-server
+    ports:
+      - "8085:8080"
+    depends_on:
+      - postgres
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./ingestion:/opt/airflow/project/ingestion
+    - ./validation:/opt/airflow/project/validation
+    - ./source:/opt/airflow/project/source
+    - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - postgres
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    depends_on:
+      - postgres
 volumes:
   postgres_data:
+  minio_data:
