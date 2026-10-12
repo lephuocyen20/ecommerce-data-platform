@@ -130,11 +130,11 @@ def generate_products(cursor, n, start_date, end_date):
 
 def calculate_discount(quantity, unit_price):
     if unit_price >= Decimal("10000000"):
-        rate = [0, 0.05, 0.10]
+        rates = [0, 0.05, 0.10]
         weights = [65, 25, 10]
 
     elif unit_price >= Decimal("1000000"):
-        rate = [0, 0.05, 0.10, 0.15]
+        rates = [0, 0.05, 0.10, 0.15]
         weights = [50, 25, 20, 5]
 
     else:
@@ -143,7 +143,7 @@ def calculate_discount(quantity, unit_price):
 
 
     discount_rate = Decimal(
-        str(random.choices(rate, weights=weights, k = 1)[0])
+        str(random.choices(rates, weights=weights, k = 1)[0])
     )
 
     gross_amount = quantity * unit_price
@@ -169,7 +169,7 @@ def generate_order_status(order_date, reference_date):
         weights = [10, 35, 50, 5]
 
     else:
-        statuses = ["DELIVERED", "CANCEL"]
+        statuses = ["DELIVERED", "CANCELLED"]
         weights = [95, 5]
 
 
@@ -214,6 +214,9 @@ def generate_orders_with_items(cursor, n, end_date):
 
     generated_items = 0
 
+    earliest_product_date = min(product[3] for product in products
+)
+
     for _ in range(n):
         customer_id, customer_created_at = random.choice(customers)
 
@@ -225,8 +228,10 @@ def generate_orders_with_items(cursor, n, end_date):
         if not eligible_product:
             raise RuntimeError("No eligible products")
 
-        order_date = random_timestamp(customer_created_at, end_date,)
+        order_start_date = max(customer_created_at, earliest_product_date,)
 
+        order_date = random_timestamp(order_start_date, end_date,)
+        
         status = generate_order_status(order_date, end_date)
 
         updated_at = generate_order_updated_at(order_date, status, end_date)
