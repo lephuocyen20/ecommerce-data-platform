@@ -51,6 +51,8 @@ def parse_args():
     parser.add_argument("--orders", type=int, default=5000)
     parser.add_argument("--months", type=int, default=12)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--stage", choices=["master", "orders"], default="master",
+)
 
     args = parser.parse_args()
 
@@ -125,7 +127,133 @@ def generate_products(cursor, n, start_date, end_date):
 
     )
     print(f"Generate {n} products")
+def generate_orders_with_items(cursor, n, end_date):
+    #Load customers
+    cursor.execute("""SELECT customer_id, created_at FROM customers""")
+    customers = cursor.fetchall()
 
+    #Load product
+    cursor.execute("""SELECT product_id, price, stock_quantity, created_at FROM products""")
+    products = cursor.fetchall()
+
+    if not customers or not products:
+        raise RuntimeError("Customer or Products are missing")
+
+    #Track stock in memory
+
+    stock = {
+        product_id: quantity
+        for product_id, price, quantity, created_at in products
+    }
+
+    statuses = [
+        "PENDING",
+        "CONFIRMED",
+        "PROCESSING",
+        "SHIPPED",
+        "DELIVERED",
+        "CANCELLED",
+    ]
+
+    status_weights = [10, 15, 20, 15, 35, 5]
+
+    generated_items = 0
+
+    for _ in range(n):
+        customer_id, customer_created_at = random.choice(customers)
+
+        eligible_product = [
+            product
+            for product in products
+            if product[3] <= end_date
+        ]
+        if not eligible_product:
+            raise RuntimeError("No eligible products")
+
+        order_date = random_timestamp(customer_created_at, end_date,)
+
+        status = random.choices(statuses, weights = status_weights, k = 1,)[0]
+
+        cursor.execute("""
+            INSERT INTO orders (
+                customer_id, status, order_date, updated_at
+                )
+                VALUES (%s, %s, %s, %s)
+                RETURNING order_id
+                """,
+                (
+                    customer_id,
+                    status,
+                    order_date,
+                    order_date,
+                ),
+        )
+
+        order_id = cursor.fetchone()[0]
+
+        #Product must exits at order date
+
+        available_products = [
+            product
+            for product in products
+            if product[3] <= order_date and stock[product[0]] > 0
+        ]
+
+        if not available_products:
+            raise RuntimeError(f"No available products for order {order_id}")
+
+        item_count = min(random.randint(1, 5),
+                         len(available_products),
+                         )
+
+        select_products = random.sample(
+            available_products,
+            item_count,
+        )
+
+        for product_id, price, _, _ in select_products:
+            quantity = random.randint(1,
+                                      min(3, stock[product_id]),
+                                      )
+
+            discount = Decimal("0.00")
+
+            cursor.execute(
+                """ INSERT INTO order_items (
+                            order_id,
+                            product_id,
+                            quantity,
+                            unit_price,
+                            discount_amount
+                        )
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (
+                            order_id,
+                            product_id,
+                            quantity,
+                            price,
+                            discount,
+                        ),
+                        )
+            # Pending and cancelled orders do not consume stock
+            if status not in ("PENDING","CANCELLED"):
+                stock[product_id] -= quantity
+
+            generated_items += 1
+    #Persist updated stock
+    for product_id, remaining in stock.items():
+        cursor.execute(
+            """ UPDATE products
+            SET stock_quantity = %s
+            WHERE product_id = %s
+            """,
+            (remaining, product_id),
+    )
+
+    print(f"Generated {n} orders")
+    print(f"Generated {generated_items} order items")
+         
 
 def main():
     args = parse_args()
@@ -145,28 +273,40 @@ def main():
                 raise RuntimeError("Unsafe database connection")
 
             # Avoid duplicate data on rerun
-            cursor.execute("""
-                SELECT
-                    (SELECT COUNT(*) FROM customers),
-                    (SELECT COUNT(*) FROM products)
-            """)
-            customer_count, product_count = cursor.fetchone()
+            if args.stage == "master":
+                cursor.execute(
+                    """SELECT 
+                            (SELECT COUNT(*) FROM customers),
+                            (SELECT COUNT(*) FROM products)               
+                            """)
+                customer_count, product_count = cursor.fetchone()
 
-            if customer_count > 0 or product_count > 0:
-                raise RuntimeError(
-                    "Test database already contains customers/products. "
-                    "Refusing to append automatically."
+                if customer_count > 0 or product_count > 0:
+                    raise RuntimeError("Master data already exists")
+
+                generate_customers(
+                    cursor, args.customers, start_date, REFERENCE_DATE,
+                )
+                generate_products(
+                    cursor, args.products, start_date, REFERENCE_DATE,
                 )
 
-            generate_customers(
-                cursor, args.customers, start_date, REFERENCE_DATE
-            )
+            elif args.stage == "orders":
+                cursor.execute(
+                    """ SELECT
+                            (SELECT COUNT(*) FROM orders),
+                            (SELECT COUNT(*) FROM order_items)
+                """
+                )
+                order_count, item_count = cursor.fetchone()
+                if order_count > 0 or item_count > 0:
+                    raise RuntimeError("Orders already exists")
 
-            generate_products(
-                cursor, args.products, start_date, REFERENCE_DATE
-            )
-
-    print("Task 5.1A.2.2 completed successfully")
+                generate_orders_with_items(
+                    cursor,
+                    args.orders,
+                    REFERENCE_DATE,
+                )
 
 
 if __name__ == "__main__":
