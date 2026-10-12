@@ -127,6 +127,32 @@ def generate_products(cursor, n, start_date, end_date):
 
     )
     print(f"Generate {n} products")
+
+def calculate_discount(quantity, unit_price):
+    if unit_price >= Decimal("10000000"):
+        rate = [0, 0.05, 0.10]
+        wieghts = [65, 25, 10]
+
+    elif unit_price >= Decimal("1000000"):
+        rate = [0, 0.05, 0.10, 0.15]
+        wieghts = [50, 25, 20, 5]
+
+    else:
+        rates = [0, 0.05, 0.10, 0.15]
+        weights = [40, 20, 25, 15]
+
+
+    discount_rate = Decimal(
+        str(random.choices(rate, weights=wieghts, k = 1)[0])
+    )
+
+    gross_amount = quantity * unit_price
+
+    return (gross_amount * discount_rate).quantize(
+        Decimal("0.01")
+    )
+        
+
 def generate_orders_with_items(cursor, n, end_date):
     #Load customers
     cursor.execute("""SELECT customer_id, created_at FROM customers""")
@@ -216,7 +242,7 @@ def generate_orders_with_items(cursor, n, end_date):
                                       min(3, stock[product_id]),
                                       )
 
-            discount = Decimal("0.00")
+            discount = calculate_discount(quantity, price)
 
             cursor.execute(
                 """ INSERT INTO order_items (
