@@ -131,11 +131,11 @@ def generate_products(cursor, n, start_date, end_date):
 def calculate_discount(quantity, unit_price):
     if unit_price >= Decimal("10000000"):
         rate = [0, 0.05, 0.10]
-        wieghts = [65, 25, 10]
+        weights = [65, 25, 10]
 
     elif unit_price >= Decimal("1000000"):
         rate = [0, 0.05, 0.10, 0.15]
-        wieghts = [50, 25, 20, 5]
+        weights = [50, 25, 20, 5]
 
     else:
         rates = [0, 0.05, 0.10, 0.15]
@@ -143,7 +143,7 @@ def calculate_discount(quantity, unit_price):
 
 
     discount_rate = Decimal(
-        str(random.choices(rate, weights=wieghts, k = 1)[0])
+        str(random.choices(rate, weights=weights, k = 1)[0])
     )
 
     gross_amount = quantity * unit_price
@@ -151,7 +151,29 @@ def calculate_discount(quantity, unit_price):
     return (gross_amount * discount_rate).quantize(
         Decimal("0.01")
     )
-        
+
+def generate_order_status(order_date, reference_date):
+    age_days = (reference_date - order_date).days
+
+
+    if age_days <= 2:
+        statuses = ["PENDING", "CONFIRMED", "CANCELLED"]
+        weights = [60, 35, 5]
+
+    elif age_days <= 7:
+        statuses = ["CONFIRMED", "PROCESSING", "SHIPPED", "CANCELLED"]
+        weights = [15, 45, 35, 5]
+
+    elif age_days <= 14:
+        statuses = ["PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"]
+        weights = [10, 35, 50, 5]
+
+    else:
+        statuses = ["DELIVERED", "CANCEL"]
+        weights = [95, 5]
+
+
+    return random.choices(statuses, weights = weights, k = 1)[0]
 
 def generate_orders_with_items(cursor, n, end_date):
     #Load customers
@@ -172,17 +194,6 @@ def generate_orders_with_items(cursor, n, end_date):
         for product_id, price, quantity, created_at in products
     }
 
-    statuses = [
-        "PENDING",
-        "CONFIRMED",
-        "PROCESSING",
-        "SHIPPED",
-        "DELIVERED",
-        "CANCELLED",
-    ]
-
-    status_weights = [10, 15, 20, 15, 35, 5]
-
     generated_items = 0
 
     for _ in range(n):
@@ -198,7 +209,7 @@ def generate_orders_with_items(cursor, n, end_date):
 
         order_date = random_timestamp(customer_created_at, end_date,)
 
-        status = random.choices(statuses, weights = status_weights, k = 1,)[0]
+        status = generate_order_status(order_date, end_date)
 
         cursor.execute("""
             INSERT INTO orders (
