@@ -16,3 +16,6 @@ __pycache__/
 Thumbs.db
 
 airflow/logs/
+
+# Ignore test environment variables
+source/.env.test
