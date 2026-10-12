@@ -214,28 +214,32 @@ def generate_orders_with_items(cursor, n, end_date):
 
     generated_items = 0
 
-    earliest_product_date = min(product[3] for product in products
-)
+    earliest_product_date = min(product[3] for product in products)
+
+    if earliest_product_date > end_date:
+        raise RuntimeError( "No products existed before reference date")
+
+    planned_orders = []
 
     for _ in range(n):
         customer_id, customer_created_at = random.choice(customers)
 
-        eligible_product = [
-            product
-            for product in products
-            if product[3] <= end_date
-        ]
-        if not eligible_product:
-            raise RuntimeError("No eligible products")
-
         order_start_date = max(customer_created_at, earliest_product_date,)
+        if order_start_date > end_date:
+            raise RuntimeError("Customer created after reference date")
 
         order_date = random_timestamp(order_start_date, end_date,)
-        
+
+        planned_orders.append((order_date, customer_id))
+
+    planned_orders.sort(key = lambda row: row[0])
+
+    for order_date, customer_id in planned_orders:
         status = generate_order_status(order_date, end_date)
 
         updated_at = generate_order_updated_at(order_date, status, end_date)
 
+        
         cursor.execute("""
             INSERT INTO orders (
                 customer_id, status, order_date, updated_at
