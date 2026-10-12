@@ -175,6 +175,24 @@ def generate_order_status(order_date, reference_date):
 
     return random.choices(statuses, weights = weights, k = 1)[0]
 
+def generate_order_updated_at(order_date, status, reference_date):
+    delay_ranges = {
+        "PENDING": (0, 0),
+        "CONFIRMED": (0, 1),
+        "PROCESSING": (1, 3),
+        "SHIPPED": (2, 5),
+        "DELIVERED": (4, 10),
+        "CANCELLED": (0, 3),
+    }
+
+    min_days, max_days = delay_ranges[status]
+
+    updated_at = order_date + timedelta(
+        days=random.randint(min_days, max_days)
+    )
+
+    return min(updated_at, reference_date)
+
 def generate_orders_with_items(cursor, n, end_date):
     #Load customers
     cursor.execute("""SELECT customer_id, created_at FROM customers""")
@@ -211,6 +229,8 @@ def generate_orders_with_items(cursor, n, end_date):
 
         status = generate_order_status(order_date, end_date)
 
+        updated_at = generate_order_updated_at(order_date, status, end_date)
+
         cursor.execute("""
             INSERT INTO orders (
                 customer_id, status, order_date, updated_at
@@ -222,7 +242,7 @@ def generate_orders_with_items(cursor, n, end_date):
                     customer_id,
                     status,
                     order_date,
-                    order_date,
+                    updated_at,
                 ),
         )
 
