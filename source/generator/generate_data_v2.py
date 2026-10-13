@@ -51,8 +51,7 @@ def parse_args():
     parser.add_argument("--orders", type=int, default=5000)
     parser.add_argument("--months", type=int, default=12)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--stage", choices=["master", "orders"], default="master",
-)
+    parser.add_argument("--stage", choices=["master", "orders", "payments"],  required=True)
 
     args = parser.parse_args()
 
@@ -319,7 +318,42 @@ def generate_orders_with_items(cursor, n, end_date):
 
     print(f"Generated {n} orders")
     print(f"Generated {generated_items} order items")
-         
+
+
+def generate_payments(cursor):
+    cursor.execute("""
+        SELECT 
+            o.order_id,
+            o.status,
+            o.order_date,
+            o.updated_at,
+            SUM(
+                oi.quantity * oi.unit_price - oi.discount_amount
+            ) AS order_amount 
+        FROM orders o
+        JOIN order_items oi
+            ON o.order_id = oi.order_id
+        GROUP BY
+            o.order_id,
+            o.status,
+            o.order_date,
+            o.updated_at
+        ORDER BY
+            o.order_date""")
+
+    orders = cursor.fetchall()
+
+    if not orders:
+            raise RuntimeError("No orders available for payments generation")
+    print(f"Loaded {len(orders)} orders for payments")
+
+    for order_id, status, order_date, updated_at, amount in orders[:5]:
+        print(
+            f"Order = {order_id},"
+            f"Status = {status},"
+            f"Amount = {amount}"
+        )
+
 
 def main():
     args = parse_args()
@@ -373,6 +407,14 @@ def main():
                     args.orders,
                     REFERENCE_DATE,
                 )
+            elif args.stage == "payments":
+                cursor.execute("SELECT COUNT(*) FROM payments")
+                existing_payments = cursor.fetchone()[0]
+
+                if existing_payments > 0:
+                    raise RuntimeError("Payments already exist. Refusing duplicate generation.")
+
+                generate_payments(cursor)
 
 
 if __name__ == "__main__":
