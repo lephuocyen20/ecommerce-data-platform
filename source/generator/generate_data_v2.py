@@ -7,7 +7,7 @@ from faker import Faker
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-
+import uuid
 import psycopg2
 from dotenv import load_dotenv
 
@@ -319,8 +319,18 @@ def generate_orders_with_items(cursor, n, end_date):
     print(f"Generated {n} orders")
     print(f"Generated {generated_items} order items")
 
-def generate_payment_statuses(order_status):
-    if order_status == "PENDDING":
+def generate_payment_statuses(order_status, payment_method):
+    if payment_method == "COD":
+        if order_status == "DELIVERED":
+            return ["SUCCESS"]
+
+        if order_status == "CANCELLED":
+            return []
+
+        return ["PENDING"]
+    
+    
+    if order_status == "PENDING":
         return random.choice([
             [],
             ["PENDING"]
@@ -345,6 +355,22 @@ def generate_payment_statuses(order_status):
         ])
 
     raise RuntimeError(f"Unsupported order status: {order_status}")
+
+def generate_payment_method():
+    return random.choices(
+        population=[
+            "BANK_TRANSFER",
+            "CREDIT_CARD",
+            "E_WALLET",
+            "COD"
+        ],
+        weights=[35, 25, 25, 15],
+        k=1
+    )[0]
+def generate_transaction_id():
+    return f"TXN-{uuid.uuid4().hex[:16].upper()}"
+
+
 
 def generate_payments(cursor):
     cursor.execute("""
@@ -374,13 +400,52 @@ def generate_payments(cursor):
     print(f"Loaded {len(orders)} orders for payments")
 
     for order_id, status, order_date, updated_at, amount in orders[:10]:
-        payment_statuses = generate_payment_statuses(status)
+        payment_method = generate_payment_method()
+        payment_statuses = generate_payment_statuses(status, payment_method)
         print(
             f"Order = {order_id},"
-            f"Order_Status = {status},"
+            f"Payment_menthod = {payment_method},"
             f"PaymentHistory = {payment_statuses}"
         )
 
+        for attempt_no, payment_status in enumerate(payment_statuses, start=1):
+            transaction_id = generate_transaction_id()
+
+            print(
+                f"  Attempt={attempt_no}, "
+                f"Status={payment_status}, "
+                f"Transaction={transaction_id}"
+            )
+    print("\n=== PAYMENT STATUS TEST ===")
+
+    test_statuses = [
+        "PENDING",
+        "CONFIRMED",
+        "PROCESSING",
+        "SHIPPED",
+        "DELIVERED",
+        "CANCELLED"
+    ]
+
+    test_methods = [
+        "BANK_TRANSFER",
+        "CREDIT_CARD",
+        "E_WALLET",
+        "COD"
+    ]
+
+    for order_status in test_statuses:
+        for method in test_methods:
+            history = generate_payment_statuses(
+                order_status,
+                method
+            )
+
+            print(
+                f"Order={order_status}, "
+                f"Method={method}, "
+                f"History={history}"
+            )
 
 def main():
     args = parse_args()
