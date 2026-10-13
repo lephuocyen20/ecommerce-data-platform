@@ -370,6 +370,48 @@ def generate_payment_method():
 def generate_transaction_id():
     return f"TXN-{uuid.uuid4().hex[:16].upper()}"
 
+def generate_online_payment_timeline(order_date, order_updated_at, payment_statuses, end_date
+):
+    if not payment_statuses:
+        return []
+
+    latest_allowed = min(order_updated_at, end_date)
+
+    # Mỗi attempt cần tối thiểu 1 phút
+    required_time = timedelta(
+        minutes=len(payment_statuses)
+    )
+
+    if order_date + required_time > latest_allowed:
+        raise RuntimeError(
+            "Insufficient time for payment attempts"
+        )
+
+    payment_times = []
+    current_time = order_date
+
+    for index, payment_status in enumerate(payment_statuses):
+        remaining_attempts = (
+            len(payment_statuses) - index - 1
+        )
+
+        max_allowed_time = (
+            latest_allowed
+            - timedelta(minutes=remaining_attempts)
+        )
+
+        proposed_time = current_time + timedelta(
+            minutes=random.randint(1, 10)
+        )
+
+        current_time = min(
+            proposed_time,
+            max_allowed_time
+        )
+
+        payment_times.append(current_time)
+
+    return payment_times
 
 
 def generate_payments(cursor):
@@ -416,36 +458,23 @@ def generate_payments(cursor):
                 f"Status={payment_status}, "
                 f"Transaction={transaction_id}"
             )
-    print("\n=== PAYMENT STATUS TEST ===")
 
-    test_statuses = [
-        "PENDING",
-        "CONFIRMED",
-        "PROCESSING",
-        "SHIPPED",
-        "DELIVERED",
-        "CANCELLED"
-    ]
-
-    test_methods = [
-        "BANK_TRANSFER",
-        "CREDIT_CARD",
-        "E_WALLET",
-        "COD"
-    ]
-
-    for order_status in test_statuses:
-        for method in test_methods:
-            history = generate_payment_statuses(
-                order_status,
-                method
+        if payment_method != "COD":
+            payment_times = generate_online_payment_timeline(
+                order_date,
+                updated_at,
+                payment_statuses,
+                REFERENCE_DATE
             )
 
-            print(
-                f"Order={order_status}, "
-                f"Method={method}, "
-                f"History={history}"
-            )
+            for payment_status, payment_time in zip(
+                payment_statuses,
+                payment_times
+            ):
+                print(
+                    f"Status={payment_status}, "
+                    f"CreatedAt={payment_time}"
+                )   
 
 def main():
     args = parse_args()
