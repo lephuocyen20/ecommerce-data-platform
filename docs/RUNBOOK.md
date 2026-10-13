@@ -26,27 +26,54 @@ tạo Docker volume. MinIO Console chạy tại `http://localhost:9001`.
 
 ## 2. Sinh dữ liệu nguồn trong PostgreSQL
 
-Mở `source/generator/generate_data.py`. Trong block
-`if __name__ == "__main__"`, thay `pass` bằng các lệnh sau. Cần giữ đúng thứ tự
-phụ thuộc dữ liệu:
+Generator V2 dùng một entry point duy nhất: `source/generator/generate_data_v2.py`.
+Logic được tách theo bảng trong `source/generator/v2/`, nhưng không cần chạy từng
+module riêng lẻ.
 
-```python
-generate_customers(db_cursor, 100)
-generate_products(db_cursor, 100)
-generate_orders(db_cursor, 500)
-generate_order_items(db_cursor, 1_000)
-generate_payments(db_cursor, 400)
-generate_shipments(db_cursor, 300)
-```
+> **Lưu ý về database:** V2 chỉ kết nối database `ecommerce_test`, theo cấu hình
+> trong `source/generator/.env.test`. Docker Compose mặc định tạo database
+> `ecommerce`, là database được ingestion và pipeline sử dụng. Vì vậy V2 là công cụ
+> tạo/kiểm thử dữ liệu tách biệt; không tự động cung cấp dữ liệu cho pipeline mặc
+> định. Cần có database `ecommerce_test` đã áp dụng schema trước khi chạy V2.
 
-Sau đó chạy:
+Tạo dữ liệu theo đúng thứ tự phụ thuộc dưới đây:
 
 ```powershell
-.\.venv\Scripts\python.exe source\generator\generate_data.py
+# Tạo customers và products
+.\.venv\Scripts\python.exe source\generator\generate_data_v2.py --stage master
+
+# Tạo orders và order_items
+.\.venv\Scripts\python.exe source\generator\generate_data_v2.py --stage orders
+
+# Sinh và kiểm tra payment records trong bộ nhớ
+.\.venv\Scripts\python.exe source\generator\generate_data_v2.py --stage payments
 ```
 
-Chỉ chạy bước này khi muốn có dữ liệu nguồn mới. Mỗi lần chạy sẽ thêm dữ liệu
-vào các bảng hiện có.
+Lệnh tổng quát là:
+
+```powershell
+.\.venv\Scripts\python.exe source\generator\generate_data_v2.py --stage <master|orders|payments>
+```
+
+Có thể điều chỉnh quy mô và dữ liệu sinh ngẫu nhiên bằng các tham số `--customers`,
+`--products`, `--orders`, `--months`, và `--seed`. Ví dụ:
+
+```powershell
+.\.venv\Scripts\python.exe source\generator\generate_data_v2.py --stage master --customers 1000 --products 300 --months 12 --seed 42
+.\.venv\Scripts\python.exe source\generator\generate_data_v2.py --stage orders --orders 5000 --months 12 --seed 42
+```
+
+Stage `master` ghi vào `customers` và `products`; stage `orders` ghi vào `orders`,
+`order_items`, đồng thời cập nhật tồn kho. Stage `payments` hiện chỉ tạo và chạy các
+kiểm tra chất lượng (DQ) cho payment records trong bộ nhớ, **chưa ghi records vào
+bảng `payments`**.
+
+Generator V2 từ chối chạy lại `master` hoặc `orders` nếu các bảng tương ứng đã có
+dữ liệu. Muốn tạo một bộ dữ liệu mới, hãy làm trống database test trước khi chạy lại
+từ stage `master`.
+
+Để tạo dữ liệu cho pipeline Docker mặc định (`ecommerce`), vẫn dùng
+`source/generator/generate_data.py` hoặc một nguồn dữ liệu khác kết nối database đó.
 
 ## 3. Trích xuất PostgreSQL sang tầng Bronze
 
