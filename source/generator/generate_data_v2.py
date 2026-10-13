@@ -367,6 +367,7 @@ def generate_payment_method():
         weights=[35, 25, 25, 15],
         k=1
     )[0]
+
 def generate_transaction_id():
     return f"TXN-{uuid.uuid4().hex[:16].upper()}"
 
@@ -413,6 +414,31 @@ def generate_online_payment_timeline(order_date, order_updated_at, payment_statu
 
     return payment_times
 
+def generate_cod_payment_timeline(order_date, order_updated_at, payment_statuses, end_date):
+    if not payment_statuses:
+        return []
+
+    payment_status = payment_statuses[0]
+
+    if payment_status == "PENDING":
+        return [order_date]
+
+    if payment_status == "SUCCESS":
+        payment_time = min(
+            order_updated_at,
+            end_date
+        )
+
+        if payment_time < order_date:
+            raise RuntimeError(
+                "COD payment time before order date"
+            )
+
+        return [payment_time]
+
+    raise RuntimeError(
+        f"Unsupported COD payment status: {payment_status}"
+    )
 
 def generate_payments(cursor):
     cursor.execute("""
@@ -459,22 +485,45 @@ def generate_payments(cursor):
                 f"Transaction={transaction_id}"
             )
 
-        if payment_method != "COD":
-            payment_times = generate_online_payment_timeline(
-                order_date,
-                updated_at,
-                payment_statuses,
-                REFERENCE_DATE
-            )
+        if payment_method == "COD":
+            payment_times = generate_cod_payment_timeline(order_date, updated_at, payment_statuses, REFERENCE_DATE)
 
-            for payment_status, payment_time in zip(
-                payment_statuses,
-                payment_times
-            ):
-                print(
-                    f"Status={payment_status}, "
-                    f"CreatedAt={payment_time}"
-                )   
+
+        else:
+            payment_times = generate_online_payment_timeline(order_date, updated_at, payment_statuses, REFERENCE_DATE)
+
+        for attempt_no, (payment_status, payment_time) in enumerate(zip(payment_statuses, payment_times), start=1):
+            print(
+                f"  Attempt={attempt_no}, "
+                f"Status={payment_status}, "
+                f"CreatedAt={payment_time}"
+        )
+    print("\n=== COD TIMELINE TEST ===")
+
+    test_order_date = datetime(2026, 9, 1, 10, 0)
+    test_updated_at = datetime(2026, 9, 6, 15, 30)
+
+    for status in [
+    "PENDING",
+    "CONFIRMED",
+    "SHIPPED",
+    "DELIVERED",
+    "CANCELLED"
+]:
+        history = generate_payment_statuses(status, "COD")
+
+        times = generate_cod_payment_timeline(
+            test_order_date,
+            test_updated_at,
+            history,
+            REFERENCE_DATE
+    )
+
+        print(
+            f"OrderStatus={status}, "
+            f"History={history}, "
+            f"Times={times}"
+    )  
 
 def main():
     args = parse_args()
