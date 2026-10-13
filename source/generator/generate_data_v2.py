@@ -319,6 +319,32 @@ def generate_orders_with_items(cursor, n, end_date):
     print(f"Generated {n} orders")
     print(f"Generated {generated_items} order items")
 
+def generate_payment_statuses(order_status):
+    if order_status == "PENDDING":
+        return random.choice([
+            [],
+            ["PENDING"]
+        ])
+
+    if order_status in ("CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED"):
+        failed_attemps = random.choices(
+            population=[0, 1, 2],
+            weights=[75, 20, 5],
+            k=1
+        )[0]
+
+        return (
+            ["FAILED"] * failed_attemps + ["SUCCESS"]
+        )
+    
+    if order_status == "CANCELLED":
+        return random.choice([
+            [],
+            ["FAILED"],
+            ["SUCCESS", "REFUNDED"]
+        ])
+
+    raise RuntimeError(f"Unsupported order status: {order_status}")
 
 def generate_payments(cursor):
     cursor.execute("""
@@ -347,11 +373,12 @@ def generate_payments(cursor):
             raise RuntimeError("No orders available for payments generation")
     print(f"Loaded {len(orders)} orders for payments")
 
-    for order_id, status, order_date, updated_at, amount in orders[:5]:
+    for order_id, status, order_date, updated_at, amount in orders[:10]:
+        payment_statuses = generate_payment_statuses(status)
         print(
             f"Order = {order_id},"
-            f"Status = {status},"
-            f"Amount = {amount}"
+            f"Order_Status = {status},"
+            f"PaymentHistory = {payment_statuses}"
         )
 
 
