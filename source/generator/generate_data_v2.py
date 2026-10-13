@@ -439,6 +439,32 @@ def generate_cod_payment_timeline(order_date, order_updated_at, payment_statuses
     raise RuntimeError(
         f"Unsupported COD payment status: {payment_status}"
     )
+def generate_refund_payment_timeline(
+    order_date,
+    order_updated_at,
+    end_date
+):
+    # Payment thành công trước khi đơn bị hủy
+    success_time = order_date + timedelta(
+        minutes=random.randint(1, 10)
+    )
+
+    if success_time > order_updated_at:
+        raise RuntimeError(
+            "Payment SUCCESS after order cancellation"
+        )
+
+    # Hoàn tiền sau khi đơn bị hủy
+    refund_time = order_updated_at + timedelta(
+        minutes=random.randint(1, 60)
+    )
+
+    if refund_time > end_date:
+        raise RuntimeError(
+            "Refund exceeds reference date"
+        )
+
+    return [success_time, refund_time]
 
 def generate_payments(cursor):
     cursor.execute("""
@@ -485,9 +511,11 @@ def generate_payments(cursor):
                 f"Transaction={transaction_id}"
             )
 
-        if payment_method == "COD":
-            payment_times = generate_cod_payment_timeline(order_date, updated_at, payment_statuses, REFERENCE_DATE)
+        if payment_statuses == ["SUCCESS", "REFUNDED"]:
+            payment_times = generate_refund_payment_timeline(order_date, updated_at, payment_statuses, REFERENCE_DATE)
 
+        elif payment_method == "COD":
+            payment_times = generate_cod_payment_timeline(order_date, updated_at, payment_statuses, REFERENCE_DATE)
 
         else:
             payment_times = generate_online_payment_timeline(order_date, updated_at, payment_statuses, REFERENCE_DATE)
@@ -498,32 +526,25 @@ def generate_payments(cursor):
                 f"Status={payment_status}, "
                 f"CreatedAt={payment_time}"
         )
-    print("\n=== COD TIMELINE TEST ===")
+    print("\n=== REFUND TIMELINE TEST ===")
 
     test_order_date = datetime(2026, 9, 1, 10, 0)
-    test_updated_at = datetime(2026, 9, 6, 15, 30)
+    test_cancelled_at = datetime(2026, 9, 1, 11, 0)
 
-    for status in [
-    "PENDING",
-    "CONFIRMED",
-    "SHIPPED",
-    "DELIVERED",
-    "CANCELLED"
-]:
-        history = generate_payment_statuses(status, "COD")
+    refund_times = generate_refund_payment_timeline(
+    test_order_date,
+    test_cancelled_at,
+    REFERENCE_DATE
+)
 
-        times = generate_cod_payment_timeline(
-            test_order_date,
-            test_updated_at,
-            history,
-            REFERENCE_DATE
-    )
-
+    for status, payment_time in zip(
+        ["SUCCESS", "REFUNDED"],
+        refund_times
+):
         print(
-            f"OrderStatus={status}, "
-            f"History={history}, "
-            f"Times={times}"
-    )  
+            f"Status={status}, "
+            f"CreatedAt={payment_time}"
+    )
 
 def main():
     args = parse_args()
