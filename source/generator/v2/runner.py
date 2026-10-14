@@ -7,7 +7,7 @@ from .cli import parse_args
 from .config import get_db_connection, load_config
 from .customers import generate_customers
 from .orders import generate_orders_with_items
-from .payments import generate_payments
+from .payments import generate_payments, insert_payments
 from .products import generate_products
 from .time_utils import REFERENCE_DATE
 
@@ -37,8 +37,16 @@ def main():
                 if any(cursor.fetchone()):
                     raise RuntimeError("Orders already exists")
                 generate_orders_with_items(cursor, args.orders, REFERENCE_DATE)
-            else:
+
+            elif args.stage == "payments":
                 cursor.execute("SELECT COUNT(*) FROM payments")
+
                 if cursor.fetchone()[0] > 0:
                     raise RuntimeError("Payments already exist. Refusing duplicate generation.")
-                generate_payments(cursor)
+
+                records = generate_payments(cursor)
+
+                if not args.insert:
+                    print("DRY RUN: No records inserted")
+                else:
+                    insert_payments(cursor, records)

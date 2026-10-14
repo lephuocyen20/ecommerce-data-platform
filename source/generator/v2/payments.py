@@ -157,3 +157,46 @@ def generate_payments(cursor):
     _validate_records(records, orders)
     print(f"Generated and validated {len(records)} payment records")
 
+    return records
+
+def insert_payments(cursor, records):
+    if not records:
+        raise RuntimeError("No payment records to insert")
+
+    cursor.execute("SELECT COUNT(*) FROM payments")
+    if cursor.fetchone()[0] != 0:
+        raise RuntimeError("Payments already exist. Refusing duplicate INSERT.")
+
+    query = """
+        INSERT INTO payments (
+            order_id,
+            amount,
+            payment_method,
+            status,
+            transaction_id,
+            created_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """
+
+    values = [
+        (
+            record["order_id"],
+            record["amount"],
+            record["payment_method"],
+            record["payment_status"],
+            record["transaction_id"],
+            record["created_at"],
+        )
+        for record in records
+    ]
+
+    cursor.executemany(query, values)
+
+    if cursor.rowcount != len(records):
+        raise RuntimeError(
+            f"INSERT mismatch: expected={len(records)}, "
+            f"inserted={cursor.rowcount}"
+        )
+
+    print(f"Inserted {len(records)} payment records")
