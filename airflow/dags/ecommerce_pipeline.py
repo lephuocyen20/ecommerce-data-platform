@@ -2,11 +2,7 @@
 from datetime import datetime, timedelta
 import logging
 import os
-import io
-import json
 
-from airflow.sdk import get_current_context
-from minio import Minio
 
 from airflow.sdk import dag, task
 from airflow.providers.docker.operators.docker import DockerOperator

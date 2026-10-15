@@ -10,8 +10,6 @@ import minio
 from dotenv import load_dotenv
 
 # Allow direct execution with: python ingestion/postgres_to_minio.py
-import sys
-from pathlib import Path
 
 project_root = Path(__file__).resolve().parents[1]
 

@@ -1,4 +1,3 @@
-from email import parser
 import os
 import argparse
 import json

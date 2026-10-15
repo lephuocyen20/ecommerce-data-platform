@@ -47,12 +47,15 @@ Tạo dữ liệu theo đúng thứ tự phụ thuộc dưới đây:
 
 # Sinh và kiểm tra payment records trong bộ nhớ
 .\.venv\Scripts\python.exe source\generator\generate_data_v2.py --stage payments
+
+# Sinh và kiểm tra shipment records trong bộ nhớ
+.\.venv\Scripts\python.exe source\generator\generate_data_v2.py --stage shipments
 ```
 
 Lệnh tổng quát là:
 
 ```powershell
-.\.venv\Scripts\python.exe source\generator\generate_data_v2.py --stage <master|orders|payments>
+.\.venv\Scripts\python.exe source\generator\generate_data_v2.py --stage <master|orders|payments|shipments> [--insert]
 ```
 
 Có thể điều chỉnh quy mô và dữ liệu sinh ngẫu nhiên bằng các tham số `--customers`,
@@ -64,9 +67,8 @@ Có thể điều chỉnh quy mô và dữ liệu sinh ngẫu nhiên bằng các
 ```
 
 Stage `master` ghi vào `customers` và `products`; stage `orders` ghi vào `orders`,
-`order_items`, đồng thời cập nhật tồn kho. Stage `payments` hiện chỉ tạo và chạy các
-kiểm tra chất lượng (DQ) cho payment records trong bộ nhớ, **chưa ghi records vào
-bảng `payments`**.
+`order_items`, đồng thời cập nhật tồn kho. Stage `payments` và `shipments` sinh,
+kiểm tra DQ, rồi chỉ ghi vào database khi có cờ `--insert`; mặc định là dry run.
 
 Generator V2 từ chối chạy lại `master` hoặc `orders` nếu các bảng tương ứng đã có
 dữ liệu. Muốn tạo một bộ dữ liệu mới, hãy làm trống database test trước khi chạy lại
@@ -99,10 +101,11 @@ Chạy Spark trong Spark container của project. Tùy chọn `--packages` bổ 
 connector để truy cập MinIO; lần chạy đầu có thể tải các dependency.
 
 ```powershell
-docker exec -w /opt/spark/work-dir ecommerce-spark spark-submit --packages org.apache.hadoop:hadoop-aws:3.3.4 transformation/bronze_to_silver.py
+docker exec -w /opt/spark/work-dir ecommerce-spark spark-submit --packages org.apache.hadoop:hadoop-aws:3.3.4 transformation/bronze_to_silver.py --manifest-key <manifest-key>
 ```
 
-Lệnh này đọc CSV Bronze mới nhất của mọi bảng, áp dụng transformation, rồi ghi
+`<manifest-key>` là key manifest của batch Bronze, ví dụ `manifests/<run-id>/bronze.json`.
+Lệnh đọc đúng các CSV Bronze được manifest tham chiếu, áp dụng transformation, rồi ghi
 đè dataset Parquet tương ứng tại `silver/<table>/`.
 
 ## 6. Kiểm tra tầng Silver
