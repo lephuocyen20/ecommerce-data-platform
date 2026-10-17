@@ -11,7 +11,7 @@ x-airflow-common: &airflow-common
 
     DB_HOST: postgres
     DB_PORT: "5432"
-    DB_NAME: ecommerce
+    DB_NAME: ecommerce_test
     DB_USER: ecommerce_user
     DB_PASSWORD: ecommerce_pass
 

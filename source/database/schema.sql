@@ -62,3 +62,37 @@ CREATE TABLE shipments (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+
+# Tạo function dùng chung BEFORE_UPDATE
+
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$;
+
+
+CREATE TRIGGER trg_customers_updated_at
+BEFORE UPDATE ON public.customers
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+CREATE TRIGGER trg_products_updated_at
+BEFORE UPDATE ON public.products
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+CREATE TRIGGER trg_orders_updated_at
+BEFORE UPDATE ON public.orders
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+CREATE TRIGGER trg_shipments_updated_at
+BEFORE UPDATE ON public.shipments
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
