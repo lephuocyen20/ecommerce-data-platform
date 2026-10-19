@@ -26,6 +26,7 @@ x-airflow-common: &airflow-common
     - ./ingestion:/opt/airflow/project/ingestion
     - ./validation:/opt/airflow/project/validation
     - ./source:/opt/airflow/project/source
+    - ./staging:/opt/airflow/project/staging
 services:
   postgres:
     image: postgres:16
@@ -57,6 +58,8 @@ services:
   airflow-init:
     <<: *airflow-common
     command: db migrate
+    volumes:
+    - ./staging:/opt/airflow/project/staging
     depends_on:
       - postgres
 
@@ -65,6 +68,8 @@ services:
     command: api-server
     ports:
       - "8085:8080"
+    volumes:
+    - ./staging:/opt/airflow/project/staging
     depends_on:
       - postgres
   airflow-scheduler:
@@ -78,12 +83,15 @@ services:
     - ./validation:/opt/airflow/project/validation
     - ./source:/opt/airflow/project/source
     - /var/run/docker.sock:/var/run/docker.sock
+    - ./staging:/opt/airflow/project/staging
     depends_on:
       - postgres
 
   airflow-dag-processor:
     <<: *airflow-common
     command: dag-processor
+    volumes:
+    - ./staging:/opt/airflow/project/staging
     depends_on:
       - postgres
 volumes:
