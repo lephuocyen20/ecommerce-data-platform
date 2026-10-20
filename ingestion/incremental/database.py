@@ -3,6 +3,9 @@
 import os
 
 import psycopg2
+from dotenv import load_dotenv
+
+load_dotenv()
 
 try:
     from .config import EXPECTED_DB_NAME
