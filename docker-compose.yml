@@ -55,11 +55,22 @@ services:
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
+
   airflow-init:
     <<: *airflow-common
-    command: db migrate
+    user: "0:0"
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+        mkdir -p /opt/airflow/logs
+        chown 50000:0 /opt/airflow/logs
+        chmod 775 /opt/airflow/logs
+        PYTHONPATH=/home/airflow/.local/lib/python3.12/site-packages exec airflow db migrate
     volumes:
-    - ./staging:/opt/airflow/project/staging
+      - ./airflow/logs:/opt/airflow/logs
+      - ./staging:/opt/airflow/project/staging
     depends_on:
       - postgres
 
@@ -85,7 +96,8 @@ services:
     - /var/run/docker.sock:/var/run/docker.sock
     - ./staging:/opt/airflow/project/staging
     depends_on:
-      - postgres
+      airflow-init:
+        condition: service_completed_successfully
 
   airflow-dag-processor:
     <<: *airflow-common
@@ -98,9 +110,9 @@ services:
     - ./validation:/opt/airflow/project/validation:ro
     - ./source:/opt/airflow/project/source:ro
     - ./staging:/opt/airflow/project/staging
-
     depends_on:
-      - postgres
+      airflow-init:
+        condition: service_completed_successfully
 volumes:
   postgres_data:
   minio_data:
