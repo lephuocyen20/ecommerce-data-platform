@@ -798,25 +798,20 @@ def run_incremental_ingestion_write(
     """
     Controlled incremental ingestion write entrypoint.
 
-    Current phase:
-        - Validate arguments.
-        - Require explicit write permission.
-        - Validate PostgreSQL database and transaction mode.
-        - Block actual write execution.
+    Requires:
+        - allow_write=True
+        - INGESTION_WRITE_ENABLED=true
+        - PostgreSQL database ecommerce_test
+        - autocommit=False
 
-    No batch creation, MinIO upload, or checkpoint commit.
+    Executes the existing two-transaction ingestion workflow.
     """
 
-    # 1. Validate input arguments.
+    # 1. Validate arguments
     if table_name not in TABLE_CONFIG:
         raise ValueError(f"Unsupported table: {table_name}")
 
-    if (
-        not isinstance(batch_size, int)
-        or isinstance(batch_size, bool)
-        or batch_size <= 0
-    ):
-        raise ValueError("batch_size must be a positive integer")
+    validate_positive_integer(batch_size, "batch_size")
 
     if not isinstance(staging_root, (str, Path)):
         raise ValueError("staging_root must be a path")
@@ -827,7 +822,7 @@ def run_incremental_ingestion_write(
     if not isinstance(allow_write, bool):
         raise ValueError("allow_write must be boolean")
 
-    # 2. Default: do not connect or write.
+    # 2. Require explicit permission
     if not allow_write:
         return {
             "table_name": table_name,
@@ -836,7 +831,13 @@ def run_incremental_ingestion_write(
             "reason": "Explicit allow_write=True is required",
         }
 
-    # 3. Validate PostgreSQL before any future write.
+    # 3. Require environment-level permission
+    if os.getenv("INGESTION_WRITE_ENABLED", "").lower() != "true":
+        raise RuntimeError(
+            "Write-mode blocked: INGESTION_WRITE_ENABLED=true is required"
+        )
+
+    # 4. Validate database and transaction mode
     conn = get_db_connection()
 
     try:
@@ -847,14 +848,23 @@ def run_incremental_ingestion_write(
             cur.execute("SELECT current_database()")
             database = cur.fetchone()[0]
 
-        if database != "ecommerce_test":
-            raise RuntimeError(f"Write-mode blocked for database: {database}")
-
-        # 4. Write execution is intentionally disabled.
-        raise NotImplementedError("Production write-mode is not enabled yet")
+        if database != EXPECTED_DB_NAME:
+            raise RuntimeError(
+                f"Write-mode blocked for database: {database}"
+            )
 
     finally:
         conn.rollback()
         conn.close()
 
+    # 5. Execute existing two-transaction workflow
+    result = _execute_two_transaction_ingestion(
+        table_name=table_name,
+        batch_size=batch_size,
+        staging_root=staging_root,
+    )
 
+    return {
+        **result,
+        "mode": "WRITE",
+    }

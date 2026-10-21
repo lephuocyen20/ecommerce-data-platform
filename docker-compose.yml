@@ -91,7 +91,14 @@ services:
     <<: *airflow-common
     command: dag-processor
     volumes:
+    - ./airflow/dags:/opt/airflow/dags:ro
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./ingestion:/opt/airflow/project/ingestion:ro
+    - ./validation:/opt/airflow/project/validation:ro
+    - ./source:/opt/airflow/project/source:ro
     - ./staging:/opt/airflow/project/staging
+
     depends_on:
       - postgres
 volumes:
