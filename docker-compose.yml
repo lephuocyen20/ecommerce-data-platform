@@ -1,21 +1,21 @@
 x-airflow-common: &airflow-common
   image: ecommerce-airflow:3.1.7
   user: "${AIRFLOW_UID:-50000}:0"
-  environment:
+  environment: &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@${AIRFLOW_DB_HOST}:${AIRFLOW_DB_PORT}/${AIRFLOW_DB_NAME}
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     INGESTION_WRITE_ENABLED: "true"
 
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
-    AIRFLOW__API_AUTH__JWT_SECRET: abcea1d7e055fb8b8a2704e86bd38c178166e47b3e1fe059d37f345af5619f5a
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
     AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY}
 
     DB_HOST: postgres
     DB_PORT: "5432"
     DB_NAME: ecommerce_test
     DB_USER: ecommerce_user
-    DB_PASSWORD: ecommerce_pass
+    DB_PASSWORD: ${DB_PASSWORD}
 
     MINIO_ENDPOINT: minio:9000
     MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
@@ -37,7 +37,7 @@ services:
     environment:
       POSTGRES_DB: ecommerce
       POSTGRES_USER: ecommerce_user
-      POSTGRES_PASSWORD: ecommerce_pass
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -49,14 +49,34 @@ services:
     container_name: ecommerce-minio
     restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin123
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD:  ${MINIO_ROOT_PASSWORD}
     ports:
       - "9000:9000"
       - "9001:9001"
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
+
+  dbt-runner:
+    build:
+      context: .
+      dockerfile: warehouse/dbt.Dockerfile
+    environment:
+      DBT_PROFILES_DIR: /app/profiles
+      DBT_HOST: postgres
+      DBT_PORT: "5432"
+      DBT_NAME: ecommerce_test
+      DBT_USER: ${DB_USER}
+      DBT_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - ./warehouse/ecommerce_dbt:/app
+      - ./warehouse/dbt_profiles:/app/profiles:ro
+    working_dir: /app
+    depends_on:
+      - postgres
+    profiles:
+      - dbt
 
   airflow-init:
     <<: *airflow-common
@@ -87,6 +107,14 @@ services:
       - postgres
   airflow-scheduler:
     <<: *airflow-common
+    environment:
+      <<: *airflow-common-env
+      WAREHOUSE_WRITE_ENABLED: "false"
+      WAREHOUSE_DB_HOST: postgres
+      WAREHOUSE_DB_PORT: ${DB_PORT}
+      WAREHOUSE_DB_NAME: ${DB_NAME}
+      WAREHOUSE_DB_USER: ${DB_USER}
+      WAREHOUSE_DB_PASSWORD: ${DB_PASSWORD}
     command: scheduler
     volumes:
     - ./airflow/dags:/opt/airflow/dags
@@ -97,12 +125,21 @@ services:
     - ./source:/opt/airflow/project/source
     - /var/run/docker.sock:/var/run/docker.sock
     - ./staging:/opt/airflow/project/staging
+    - ./warehouse:/opt/airflow/project/warehouse:ro
     depends_on:
       airflow-init:
         condition: service_completed_successfully
 
   airflow-dag-processor:
+
     <<: *airflow-common
+    environment:
+      <<: *airflow-common-env
+      WAREHOUSE_DB_HOST: postgres
+      WAREHOUSE_DB_PORT: ${DB_PORT}
+      WAREHOUSE_DB_NAME: ${DB_NAME}
+      WAREHOUSE_DB_USER: ${DB_USER}
+      WAREHOUSE_DB_PASSWORD: ${DB_PASSWORD}
     command: dag-processor
     volumes:
     - ./airflow/dags:/opt/airflow/dags:ro

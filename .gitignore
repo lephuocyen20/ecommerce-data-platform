@@ -25,3 +25,6 @@ source/.env.test
 **/target/
 **/logs/
 **/dbt.log
+
+# Runtime staging data
+/staging/
