@@ -1,0 +1,103 @@
+version: 2
+
+models:
+  - name: fact_payments
+    description: "Payment transaction-level fact table. Grain: one row per payment_id. Payment amount is not recognized revenue."
+
+    columns:
+      - name: payment_id
+        description: "Unique payment identifier."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: order_id
+        description: "Foreign key to fact_orders."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fact_orders')
+                field: order_id
+
+      - name: customer_id
+        description: "Foreign key to dim_customers."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+
+      - name: order_date_key
+        description: "Order date key in YYYYMMDD format."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+
+      - name: payment_date_key
+        description: "Payment creation date key in YYYYMMDD format."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+
+      - name: payment_created_at
+        description: "Timestamp when the payment record was created."
+        data_tests:
+          - not_null
+
+      - name: payment_method
+        description: "Payment method."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - COD
+                  - BANK_TRANSFER
+                  - CREDIT_CARD
+                  - E_WALLET
+
+      - name: payment_status
+        description: "Payment transaction status."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - SUCCESS
+                  - FAILED
+                  - PENDING
+                  - REFUNDED
+
+      - name: transaction_id
+        description: "Unique external transaction identifier."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: payment_amount
+        description: "Original transaction amount, not recognized revenue."
+        data_tests:
+          - not_null
+
+      - name: is_successful
+        description: "True only when payment_status equals SUCCESS."
+        data_tests:
+          - not_null
+
+      - name: _silver_batch_id
+        description: "Source Silver batch identifier."
+        data_tests:
+          - not_null
+
+      - name: _loaded_at
+        description: "Timestamp when the payment entered the Raw Warehouse."
+        data_tests:
+          - not_null

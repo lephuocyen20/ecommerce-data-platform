@@ -1,0 +1,147 @@
+version: 2
+
+models:
+  - name: fact_shipments
+    description: "Shipment-level fact table. Grain: one row per shipment_id. Includes shipment dates, carrier, shipping fees and delivery metrics."
+
+    columns:
+      - name: shipment_id
+        description: "Unique shipment identifier."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: order_id
+        description: "Foreign key to fact_orders."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fact_orders')
+                field: order_id
+
+      - name: customer_id
+        description: "Foreign key to dim_customers."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+
+      - name: order_date_key
+        description: "Order date key in YYYYMMDD format."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+
+      - name: shipment_created_date_key
+        description: "Shipment creation date key."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+
+      - name: shipped_date_key
+        description: "Date when the shipment was shipped. Nullable for pending shipments."
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+
+      - name: delivered_date_key
+        description: "Actual delivery date key. Nullable for non-delivered shipments."
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+
+      - name: estimated_delivery_date_key
+        description: "Estimated delivery date key."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+
+      - name: updated_date_key
+        description: "Last update date key."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+
+      - name: carrier
+        description: "Shipping carrier."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - GHN
+                  - GHTK
+                  - Viettel Post
+
+      - name: tracking_number
+        description: "Unique shipment tracking number."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: shipping_fee
+        description: "Recorded shipping fee."
+        data_tests:
+          - not_null
+
+      - name: shipment_status
+        description: "Shipment lifecycle status."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - PENDING
+                  - PICKED_UP
+                  - IN_TRANSIT
+                  - OUT_FOR_DELIVERY
+                  - DELIVERED
+
+      - name: shipment_created_at
+        description: "Shipment creation timestamp."
+        data_tests:
+          - not_null
+
+      - name: estimated_delivery_at
+        description: "Estimated delivery timestamp."
+        data_tests:
+          - not_null
+
+      - name: updated_at
+        description: "Last update timestamp."
+        data_tests:
+          - not_null
+
+      - name: is_delivered
+        description: "True when shipment_status equals DELIVERED."
+        data_tests:
+          - not_null
+
+      - name: _silver_batch_id
+        description: "Source Silver batch identifier."
+        data_tests:
+          - not_null
+
+      - name: _loaded_at
+        description: "Warehouse loading timestamp."
+        data_tests:
+          - not_null

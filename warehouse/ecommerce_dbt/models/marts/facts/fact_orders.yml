@@ -1,0 +1,84 @@
+version: 2
+
+models:
+  - name: fact_orders
+    description: "Order-level fact table. Grain: one row per order."
+
+    columns:
+      - name: order_id
+        description: "Unique order identifier."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: customer_id
+        description: "Foreign key to dim_customers."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+
+      - name: order_date_key
+        description: "Integer date key in YYYYMMDD format."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+
+      - name: order_status
+        description: "Current order status."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - PENDING
+                  - CONFIRMED
+                  - PROCESSING
+                  - SHIPPED
+                  - DELIVERED
+                  - CANCELLED
+
+      - name: line_count
+        description: "Number of order item lines."
+        data_tests:
+          - not_null
+
+      - name: item_count
+        description: "Total quantity of products in the order."
+        data_tests:
+          - not_null
+
+      - name: gross_amount
+        description: "Total merchandise value before discounts."
+        data_tests:
+          - not_null
+
+      - name: discount_amount
+        description: "Total discount value."
+        data_tests:
+          - not_null
+
+      - name: net_amount
+        description: "Merchandise value after discounts, not recognized revenue."
+        data_tests:
+          - not_null
+
+      - name: has_items
+        description: "Whether the order contains at least one item line."
+        data_tests:
+          - not_null
+
+      - name: _silver_batch_id
+        description: "Source Silver batch identifier."
+        data_tests:
+          - not_null
+
+      - name: _loaded_at
+        description: "Timestamp when the order entered the Raw Warehouse."
+        data_tests:
+          - not_null

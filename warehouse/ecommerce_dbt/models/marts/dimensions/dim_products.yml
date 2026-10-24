@@ -1,0 +1,22 @@
+version: 2
+
+models:
+  - name: dim_products
+    description: "Current-state product dimension. Grain: one row per product."
+
+    columns:
+      - name: product_id
+        description: "Unique product identifier and dimension primary key."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: _silver_batch_id
+        description: "Source Silver batch identifier for lineage."
+        data_tests:
+          - not_null
+
+      - name: _loaded_at
+        description: "Timestamp when the product record entered the Raw Warehouse."
+        data_tests:
+          - not_null

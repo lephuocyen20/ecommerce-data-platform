@@ -1,0 +1,48 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: "Calendar dimension. Grain: one row per calendar date."
+
+    columns:
+      - name: date_key
+        description: "Integer date key in YYYYMMDD format."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: full_date
+        description: "Actual calendar date."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: day_of_month
+        description: "Day of the month (1-31)."
+        data_tests:
+          - not_null
+
+      - name: day_of_week
+        description: "ISO day of week (Monday=1, Sunday=7)."
+        data_tests:
+          - not_null
+
+      - name: month_number
+        description: "Calendar month (1-12)."
+        data_tests:
+          - not_null
+
+      - name: quarter_number
+        description: "Calendar quarter (1-4)."
+        data_tests:
+          - not_null
+
+      - name: year_number
+        description: "Calendar year."
+        data_tests:
+          - not_null
+
+      - name: is_weekend
+        description: "True for Saturday and Sunday."
+        data_tests:
+          - not_null
