@@ -1,4 +1,4 @@
-﻿"""Incremental Silver to PostgreSQL Raw Warehouse loader."""
+"""Incremental Silver to PostgreSQL Raw Warehouse loader."""
 import json
 import re
 
@@ -31,8 +31,64 @@ def get_connection():
     )
 
 
-def get_committed_batches(conn):
-    """Read committed ingestion batches not yet loaded into Warehouse."""
+def get_committed_batches(conn, selected_tables=None, selected_batch_ids=None,):
+    """
+    Read committed ingestion batches not yet loaded into Warehouse.
+
+    selected_tables=None:
+        Process all supported tables (backward compatible).
+
+    selected_tables=[...]:
+        Process only the explicitly selected tables.
+    """
+
+    if selected_tables is None:
+        tables = list(SUPPORTED_TABLES)
+    else:
+        if (
+            not isinstance(selected_tables, (list, tuple))
+            or not selected_tables
+            or any(not isinstance(t, str) for t in selected_tables)
+        ):
+            raise ValueError(
+                "selected_tables must be a non-empty list or tuple of strings"
+            )
+
+        if len(selected_tables) != len(set(selected_tables)):
+            raise ValueError("Duplicate tables are not allowed")
+
+        unsupported = set(selected_tables) - set(SUPPORTED_TABLES)
+
+        if unsupported:
+            raise ValueError(
+                f"Unsupported tables: {sorted(unsupported)}"
+            )
+
+        tables = list(selected_tables)
+
+
+    if selected_batch_ids is not None:
+        if (
+            not isinstance(selected_batch_ids, (list, tuple))
+            or not selected_batch_ids
+            or any(
+                not isinstance(batch_id, str)
+                for batch_id in selected_batch_ids
+            )
+        ):
+            raise ValueError(
+                "selected_batch_ids must be a non-empty list or tuple of strings"
+            )
+
+        if len(selected_batch_ids) != len(set(selected_batch_ids)):
+            raise ValueError("Duplicate batch IDs are not allowed")
+
+        for batch_id in selected_batch_ids:
+            if not re.fullmatch(r"[0-9a-f]{32}", batch_id):
+                raise ValueError(
+                    f"Invalid batch ID format: {batch_id}"
+                )
+
     query = """
         SELECT
             b.batch_id,
@@ -47,8 +103,9 @@ def get_committed_batches(conn):
             b.checksum_sha256
         FROM public.ingestion_batches AS b
         WHERE b.status = 'COMMITTED'
-          AND b.table_name = ANY(%s)
-          AND NOT EXISTS (
+            AND b.table_name = ANY(%s)
+            AND (%s::text[] IS NULL OR b.batch_id = ANY(%s::text[]))
+            AND NOT EXISTS (
               SELECT 1
               FROM warehouse.loaded_batches AS l
               WHERE l.batch_id = b.batch_id
@@ -64,9 +121,15 @@ def get_committed_batches(conn):
     """
 
     with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-        cursor.execute(query, (list(SUPPORTED_TABLES),))
+        cursor.execute(
+            query,
+            (
+                tables,
+                selected_batch_ids,
+                selected_batch_ids,
+            ),
+        )
         return [dict(row) for row in cursor.fetchall()]
-
 
 def get_minio_client():
     return Minio(
