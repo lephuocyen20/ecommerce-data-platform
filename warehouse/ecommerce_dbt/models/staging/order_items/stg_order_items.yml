@@ -1,0 +1,40 @@
+version: 2
+
+models:
+  - name: stg_order_items
+    description: "Staging view for verified order line items."
+
+    columns:
+      - name: order_item_id
+        description: "Unique order item identifier."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: order_id
+        description: "Order associated with this line item."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_orders')
+                field: order_id
+
+      - name: product_id
+        description: "Product associated with this line item."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_products')
+                field: product_id
+
+      - name: _silver_batch_id
+        description: "Source Silver batch identifier."
+        data_tests:
+          - not_null
+
+      - name: _loaded_at
+        description: "Timestamp when the record was loaded into Raw Warehouse."
+        data_tests:
+          - not_null

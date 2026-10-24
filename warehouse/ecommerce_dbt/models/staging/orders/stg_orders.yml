@@ -1,0 +1,31 @@
+version: 2
+
+models:
+  - name: stg_orders
+    description: "Staging view for verified order records."
+
+    columns:
+      - name: order_id
+        description: "Unique order identifier."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: customer_id
+        description: "Customer associated with the order."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_customers')
+                field: customer_id
+
+      - name: _silver_batch_id
+        description: "Source Silver batch identifier."
+        data_tests:
+          - not_null
+
+      - name: _loaded_at
+        description: "Timestamp when the record was loaded into Raw Warehouse."
+        data_tests:
+          - not_null

@@ -1,0 +1,26 @@
+﻿version: 2
+
+sources:
+  - name: ecommerce_raw
+    description: "Verified Silver data loaded into PostgreSQL Raw Warehouse."
+    database: ecommerce_test
+    schema: raw
+
+    tables:
+      - name: customers
+        description: "Raw customer records."
+
+      - name: products
+        description: "Raw product records."
+
+      - name: orders
+        description: "Raw order records."
+
+      - name: order_items
+        description: "Raw order line items."
+
+      - name: payments
+        description: "Raw payment records."
+
+      - name: shipments
+        description: "Raw shipment records."

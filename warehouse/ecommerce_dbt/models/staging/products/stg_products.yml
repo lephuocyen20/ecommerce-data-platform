@@ -1,0 +1,22 @@
+version: 2
+
+models:
+  - name: stg_products
+    description: "Staging view for verified product records."
+
+    columns:
+      - name: product_id
+        description: "Unique product identifier."
+        data_tests:
+          - unique
+          - not_null
+
+      - name: _silver_batch_id
+        description: "Source Silver batch identifier."
+        data_tests:
+          - not_null
+
+      - name: _loaded_at
+        description: "Timestamp when the record was loaded into Raw Warehouse."
+        data_tests:
+          - not_null
