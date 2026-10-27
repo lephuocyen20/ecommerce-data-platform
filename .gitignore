@@ -28,3 +28,11 @@ source/.env.test
 
 # Runtime staging data
 /staging/
+
+# Local-only test suite and test image definition
+/tests/
+Dockerfile.snapshot-e2e
+silver/snapshots/test_snapshot_object_discovery.py
+
+# Test-generated logs
+*.log
