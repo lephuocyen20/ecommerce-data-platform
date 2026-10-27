@@ -13,15 +13,30 @@ import json
 import os
 import re
 import uuid
-import hashlib
 from datetime import datetime, timezone
 
 from minio import Minio
 from minio.error import S3Error
 from pyspark.sql import SparkSession
 
-from config import BRONZE_BUCKET, MINIO_ENDPOINT
-from bronze_to_silver import configure_s3, TRANSFORMS
+try:
+    # Package imports are required by the snapshot/Gold pipeline and tests.
+    from transformation.config import BRONZE_BUCKET, MINIO_ENDPOINT
+    from transformation.bronze_to_silver import configure_s3, TRANSFORMS
+    from common.paths import (
+        bronze_incremental_object_key,
+        silver_incremental_batch_paths,
+    )
+    from common.object_integrity import (
+        calculate_object_sha256,
+        discover_parquet_objects,
+    )
+except ImportError:
+    # Keep compatibility with direct spark-submit from transformation/.
+    from config import BRONZE_BUCKET, MINIO_ENDPOINT
+    from bronze_to_silver import configure_s3, TRANSFORMS
+    from shared.paths import bronze_incremental_object_key, silver_incremental_batch_paths
+    from shared.object_integrity import calculate_object_sha256, discover_parquet_objects
 
 
 VALID_BATCH_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -44,10 +59,7 @@ def validate_arguments(table_name, batch_id, object_key, bronze_checksum):
     if not VALID_BATCH_ID.fullmatch(batch_id):
         raise ValueError(f"Invalid batch ID: {batch_id}")
 
-    expected_key = (
-        f"bronze_incremental/{table_name}/"
-        f"batch_id={batch_id}/data.csv"
-    )
+    expected_key = bronze_incremental_object_key(table_name, batch_id)
 
     if object_key != expected_key:
         raise ValueError(
@@ -75,17 +87,7 @@ def verify_bronze_checksum(
 ):
     """Verify the exact Bronze object before Spark reads it."""
 
-    response = client.get_object(bucket, object_key)
-    digest = hashlib.sha256()
-
-    try:
-        for chunk in response.stream(1024 * 1024):
-            digest.update(chunk)
-    finally:
-        response.close()
-        response.release_conn()
-
-    actual_checksum = digest.hexdigest()
+    actual_checksum = calculate_object_sha256(client, bucket, object_key)
 
     if actual_checksum != expected_checksum:
         raise ValueError(
@@ -148,10 +150,9 @@ def verify_published_manifest(
         raise ValueError("Silver manifest Bronze key mismatch")
     if manifest.get("bronze_checksum_sha256") != bronze_checksum:
         raise ValueError("Silver manifest Bronze checksum mismatch")
-    expected_prefix = (
-        f"silver_incremental/{table_name}/"
-        f"batch_id={batch_id}/runs/"
-    )
+    expected_prefix = silver_incremental_batch_paths(
+        table_name, batch_id
+    )["runs_prefix"]
 
     data_prefix = manifest.get("data_prefix")
 
@@ -174,27 +175,12 @@ def verify_published_manifest(
     ):
         raise ValueError("Invalid Silver row count")
 
-    actual_parquet_objects = sorted(
-    [
-        {
-            "object_key": obj.object_name,
-            "size": obj.size,
-            "etag": obj.etag.strip('"'),
-        }
-        for obj in client.list_objects(
-            bucket,
-            prefix=data_prefix,
-            recursive=True,
-        )
-        if obj.object_name.endswith(".parquet")
-    ],
-    key=lambda item: item["object_key"],
-)
-
-    if not actual_parquet_objects:
-        raise ValueError(
-            "Published Silver Parquet files are missing"
-            )
+    actual_parquet_objects = discover_parquet_objects(
+        client,
+        bucket,
+        data_prefix,
+        include_etag=True,
+    )
     
     expected_parquet_objects = manifest.get("parquet_objects")
 
@@ -292,12 +278,9 @@ def transform_batch( spark, client, table_name, batch_id, object_key, bronze_che
             bucket,
          object_key,
             bronze_checksum,)
-    batch_prefix = (
-        f"silver_incremental/{table_name}/"
-        f"batch_id={batch_id}/"
-    )
-
-    manifest_key = batch_prefix + "_BATCH_METADATA.json"
+    silver_paths = silver_incremental_batch_paths(table_name, batch_id)
+    batch_prefix = silver_paths["batch_prefix"]
+    manifest_key = silver_paths["manifest_key"]
 
     existing_manifest = get_completion_manifest(
         client,
