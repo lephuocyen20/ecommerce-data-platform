@@ -217,8 +217,6 @@ The repository includes two principal processing DAGs:
 | `ecommerce_pipeline` | Original batch pipeline | `0 19 * * *` |
 | `ecommerce_incremental_ingestion` | Controlled incremental pipeline | Manual |
 
-A separate `dockeroperator_runtime_probe` DAG supports runtime verification.
-
 ### 9.1 Incremental DAG Execution Flow
 
 ```mermaid
