@@ -226,6 +226,9 @@ These results represent completed development validation runs rather than a cont
 
 ## 8. Project Structure
 
+The canonical module map, including the Silver/Gold migration boundary, is in
+[PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md).
+
 ```text
 ecommerce-data-platform/
 ├── airflow/              # Airflow DAGs and Docker configuration
@@ -303,9 +306,44 @@ docker compose ps
 |---|---|---|
 | `ecommerce_pipeline` | Existing batch pipeline | `0 19 * * *` |
 | `ecommerce_incremental_ingestion` | Incremental ingestion and downstream processing | Manual |
-| `dockeroperator_runtime_probe` | Docker runtime verification | Manual |
 
 The incremental DAG defaults to `DRY_RUN`. WRITE execution requires explicit configuration and should only be enabled after reviewing the operational runbook.
+
+### Gold Layer in the Incremental DAG
+
+After a successful `WRITE` run has loaded the warehouse and completed `dbt
+build`, `ecommerce_incremental_ingestion` can create immutable Silver snapshots
+and validate all four Gold marts. Set `GOLD_SNAPSHOT_WRITE_ENABLED=true` on the
+Airflow scheduler before triggering that run. The Gold runner itself remains
+`DRY_RUN`: it validates lineage, source quality, output quality and grain, but
+does not yet publish Gold data.
+
+The Airflow Graph shows the exact lineage through `snapshot_*` and
+`gold_sources_*` tasks:
+
+```mermaid
+flowchart LR
+    BO[Bronze orders batch] --> TO[bronze_to_silver_orders] --> SO[snapshot_orders]
+    BI[Bronze order_items batch] --> TI[bronze_to_silver_order_items] --> SI[snapshot_order_items]
+    BP[Bronze products batch] --> TP[bronze_to_silver_products] --> SP[snapshot_products]
+    BC[Bronze customers batch] --> TC[bronze_to_silver_customers] --> SC[snapshot_customers]
+    BPAY[Bronze payments batch] --> TPAY[bronze_to_silver_payments] --> SPAY[snapshot_payments]
+
+    SO --> DS[gold_sources_daily_sales] --> GDS[gold_daily_sales]
+    SI --> DS
+    SP --> PP[gold_sources_product_performance] --> GPP[gold_product_performance]
+    SO --> PP
+    SI --> PP
+    SC --> CM[gold_sources_customer_metrics] --> GCM[gold_customer_metrics]
+    SO --> CM
+    SI --> CM
+    SPAY --> PS[gold_sources_payment_summary] --> GPS[gold_payment_summary]
+```
+
+For every table, Airflow already exposes the batch-level sequence as
+`ingest_<table> → validate_<table> → bronze_to_silver_<table> →
+verify_silver_<table>`. The validation and verification task logs include the
+Bronze `batch_id`, object key, checksum, Silver manifest key and row count.
 
 For additional operational guidance, see [RUNBOOK.md](docs/RUNBOOK.md).
 

@@ -66,6 +66,11 @@ docker compose ps
 
 MinIO Console: `http://localhost:9001`. Airflow: `http://localhost:8085`.
 
+Đăng nhập Airflow bằng `AIRFLOW_ADMIN_USERNAME` và
+`AIRFLOW_ADMIN_PASSWORD` trong `.env`. Đặt password riêng trước lần chạy đầu;
+credential này được lưu trong Docker volume `airflow_auth` nên không bị đổi
+khi recreate container.
+
 Sau khi đổi `.env` hoặc `docker-compose.yml`, recreate các Airflow services:
 
 ```powershell

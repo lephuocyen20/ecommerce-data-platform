@@ -5,6 +5,11 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@${AIRFLOW_DB_HOST}:${AIRFLOW_DB_PORT}/${AIRFLOW_DB_NAME}
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "${AIRFLOW_ADMIN_USERNAME:-admin}:admin"
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/simple_auth_manager_passwords.json
+    AIRFLOW_ADMIN_USERNAME: ${AIRFLOW_ADMIN_USERNAME:-admin}
+    AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-change_this_local_password}
+    AIRFLOW_SIMPLE_AUTH_PASSWORDS_FILE: /opt/airflow/auth/simple_auth_manager_passwords.json
     INGESTION_WRITE_ENABLED: "true"
 
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
@@ -25,9 +30,15 @@ x-airflow-common: &airflow-common
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
     - ./airflow/plugins:/opt/airflow/plugins
+    - ./airflow/bootstrap_auth.py:/opt/airflow/bootstrap_auth.py:ro
+    - airflow_auth:/opt/airflow/auth
     - ./ingestion:/opt/airflow/project/ingestion
     - ./validation:/opt/airflow/project/validation
     - ./source:/opt/airflow/project/source
+    - ./common:/opt/airflow/project/common:ro
+    - ./silver:/opt/airflow/project/silver:ro
+    - ./gold:/opt/airflow/project/gold:ro
+    - ./transformation:/opt/airflow/project/transformation:ro
     - ./staging:/opt/airflow/project/staging
 services:
   postgres:
@@ -89,9 +100,12 @@ services:
         mkdir -p /opt/airflow/logs
         chown 50000:0 /opt/airflow/logs
         chmod 775 /opt/airflow/logs
+        python /opt/airflow/bootstrap_auth.py
         PYTHONPATH=/home/airflow/.local/lib/python3.12/site-packages exec airflow db migrate
     volumes:
       - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/bootstrap_auth.py:/opt/airflow/bootstrap_auth.py:ro
+      - airflow_auth:/opt/airflow/auth
       - ./staging:/opt/airflow/project/staging
     depends_on:
       - postgres
@@ -103,13 +117,17 @@ services:
       - "8085:8080"
     volumes:
     - ./staging:/opt/airflow/project/staging
+    - ./airflow/bootstrap_auth.py:/opt/airflow/bootstrap_auth.py:ro
+    - airflow_auth:/opt/airflow/auth
     depends_on:
-      - postgres
+      airflow-init:
+        condition: service_completed_successfully
   airflow-scheduler:
     <<: *airflow-common
     environment:
       <<: *airflow-common-env
       WAREHOUSE_WRITE_ENABLED: "false"
+      GOLD_SNAPSHOT_WRITE_ENABLED: ${GOLD_SNAPSHOT_WRITE_ENABLED:-false}
       WAREHOUSE_DB_HOST: postgres
       WAREHOUSE_DB_PORT: ${DB_PORT}
       WAREHOUSE_DB_NAME: ${DB_NAME}
@@ -120,9 +138,15 @@ services:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
     - ./airflow/plugins:/opt/airflow/plugins
+    - ./airflow/bootstrap_auth.py:/opt/airflow/bootstrap_auth.py:ro
+    - airflow_auth:/opt/airflow/auth
     - ./ingestion:/opt/airflow/project/ingestion
     - ./validation:/opt/airflow/project/validation
     - ./source:/opt/airflow/project/source
+    - ./common:/opt/airflow/project/common:ro
+    - ./silver:/opt/airflow/project/silver:ro
+    - ./gold:/opt/airflow/project/gold:ro
+    - ./transformation:/opt/airflow/project/transformation:ro
     - /var/run/docker.sock:/var/run/docker.sock
     - ./staging:/opt/airflow/project/staging
     - ./warehouse:/opt/airflow/project/warehouse:ro
@@ -145,9 +169,15 @@ services:
     - ./airflow/dags:/opt/airflow/dags:ro
     - ./airflow/logs:/opt/airflow/logs
     - ./airflow/plugins:/opt/airflow/plugins
+    - ./airflow/bootstrap_auth.py:/opt/airflow/bootstrap_auth.py:ro
+    - airflow_auth:/opt/airflow/auth
     - ./ingestion:/opt/airflow/project/ingestion:ro
     - ./validation:/opt/airflow/project/validation:ro
     - ./source:/opt/airflow/project/source:ro
+    - ./common:/opt/airflow/project/common:ro
+    - ./silver:/opt/airflow/project/silver:ro
+    - ./gold:/opt/airflow/project/gold:ro
+    - ./transformation:/opt/airflow/project/transformation:ro
     - ./staging:/opt/airflow/project/staging
     depends_on:
       airflow-init:
@@ -155,3 +185,4 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  airflow_auth:

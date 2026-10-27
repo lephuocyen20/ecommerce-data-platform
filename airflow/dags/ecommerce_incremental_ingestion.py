@@ -5,6 +5,7 @@ Default: DRY_RUN for all supported tables.
 WRITE requires explicit table selection and environment permission.
 """
 
+import json
 import logging
 import os
 import re
@@ -12,38 +13,35 @@ import sys
 from datetime import datetime, timedelta
 from airflow.providers.docker.operators.docker import DockerOperator
 from docker.types import Mount
+from pipeline_contracts import GOLD_DATASET_SOURCES, TABLES
+from pipeline_config import validate_incremental_run_config
+from pipeline_gold import (
+    build_gold_source_snapshot_payload,
+    resolve_silver_snapshot_lineage,
+)
+from pipeline_operators import create_spark_submit_operator
 
 from airflow.sdk import dag, get_current_context, task
 from airflow.exceptions import AirflowSkipException
 
+# Airflow mounts the repository packages under this path.  This shared module
+# is intentionally dependency-free, so importing it during DAG parsing is safe.
+AIRFLOW_PROJECT_PATH = "/opt/airflow/project"
+if AIRFLOW_PROJECT_PATH not in sys.path:
+    sys.path.insert(0, AIRFLOW_PROJECT_PATH)
 
-TABLES = (
-    "customers",
-    "products",
-    "orders",
-    "order_items",
-    "payments",
-    "shipments",
+from common.runtime_policy import (
+    DRY_RUN,
+    WRITE,
+    is_feature_enabled,
+    require_feature_enabled,
 )
 
 STAGING_ROOT = "/opt/airflow/project/staging"
 BATCH_SIZE = 1000
-SPARK_IMAGE = "ecommerce-spark:3.5.6"
 DOCKER_NETWORK = "ecommerce-data-platform_default"
 
 PROJECT_PATH = r"C:\Users\HITLAB\Projects\ecommerce-data-platform"
-
-SPARK_TRANSFORMATION_PATH = (
-    "/opt/spark/work-dir/transformation"
-)
-
-SPARK_PYTHONPATH = (
-    "/opt/spark/work-dir:"
-    "/opt/spark/work-dir/transformation"
-)
-
-
-
 
 @dag(
     dag_id="ecommerce_incremental_ingestion",
@@ -61,60 +59,15 @@ def ecommerce_incremental_ingestion():
 
     @task(retries=0)
     def validate_config():
-        context = get_current_context()
-        dag_run = context["dag_run"]
-        conf = dag_run.conf or {}
-
-        if not isinstance(conf, dict):
-            raise ValueError("DAG configuration must be an object")
-
-        mode = conf.get("mode", "DRY_RUN")
-
-        if mode not in ("DRY_RUN", "WRITE"):
-            raise ValueError(f"Unsupported mode: {mode}")
-
-        selected_tables = conf.get("tables")
-
-        if selected_tables is None:
-            if mode == "WRITE":
-                raise ValueError(
-                    "WRITE requires explicit table selection"
-                )
-            selected_tables = list(TABLES)
-
-        if (
-            not isinstance(selected_tables, list)
-            or not selected_tables
-            or any(not isinstance(t, str) for t in selected_tables)
-        ):
-            raise ValueError("tables must be a non-empty list of strings")
-
-        if len(selected_tables) != len(set(selected_tables)):
-            raise ValueError("Duplicate tables are not allowed")
-
-        unsupported = set(selected_tables) - set(TABLES)
-
-        if unsupported:
-            raise ValueError(
-                f"Unsupported tables: {sorted(unsupported)}"
-            )
-
-        if mode == "WRITE":
-            if os.getenv("INGESTION_WRITE_ENABLED", "").lower() != "true":
-                raise RuntimeError(
-                    "WRITE blocked: INGESTION_WRITE_ENABLED=true required"
-                )
+        conf = get_current_context()["dag_run"].conf or {}
+        result = validate_incremental_run_config(conf)
 
         logging.getLogger("airflow.task").info(
             "Incremental configuration validated | mode=%s | tables=%s",
-            mode,
-            selected_tables,
+            result["mode"],
+            result["tables"],
         )
-
-        return {
-            "mode": mode,
-            "tables": selected_tables,
-        }
+        return result
 
     @task
     def ingest_incremental(table_name: str, config: dict):
@@ -142,17 +95,19 @@ def ecommerce_incremental_ingestion():
             mode,
         )
 
-        if mode == "DRY_RUN":
+        if mode == DRY_RUN:
             result = run_incremental_ingestion(
                 table_name=table_name,
                 batch_size=BATCH_SIZE,
                 dry_run=True,
                 rollback_test=False,
             )
-        elif mode == "WRITE":
+        elif mode == WRITE:
             # Recheck permission at execution time, not only in validate_config.
-            if os.getenv("INGESTION_WRITE_ENABLED", "").lower() != "true":
-                raise RuntimeError("WRITE blocked at ingestion task")
+            require_feature_enabled(
+                "INGESTION_WRITE_ENABLED",
+                "WRITE blocked at ingestion task",
+            )
             result = run_incremental_ingestion_write(
                 table_name=table_name,
                 batch_size=BATCH_SIZE,
@@ -351,7 +306,7 @@ def ecommerce_incremental_ingestion():
         ):
             raise ValueError("Invalid Bronze checksum")
 
-        return f"transform_{table_name}"
+        return f"bronze_to_silver_{table_name}"
 
     @task(retries=0)
     def skip_silver(table_name: str, validation_result: dict):
@@ -653,7 +608,7 @@ def ecommerce_incremental_ingestion():
             raise ValueError("Warehouse tables exceed DAG selection")
 
         # Independent safety gate for Warehouse writes.
-        if os.getenv("WAREHOUSE_WRITE_ENABLED", "").lower() != "true":
+        if not is_feature_enabled("WAREHOUSE_WRITE_ENABLED"):
             logger.info(
                 "Warehouse WRITE disabled | tables=%s | batches=%s",
                 tables,
@@ -668,8 +623,10 @@ def ecommerce_incremental_ingestion():
             }
 
         # Recheck ingestion permission at execution time.
-        if os.getenv("INGESTION_WRITE_ENABLED", "").lower() != "true":
-            raise RuntimeError("Ingestion WRITE permission revoked")
+        require_feature_enabled(
+            "INGESTION_WRITE_ENABLED",
+            "Ingestion WRITE permission revoked",
+        )
 
         project_path = "/opt/airflow/project/warehouse/loader"
 
@@ -1080,22 +1037,11 @@ def ecommerce_incremental_ingestion():
                 + "'] }}"
             )
 
-        return DockerOperator(
-            task_id=f"transform_{table_name}",
-            image=SPARK_IMAGE,
-            network_mode=DOCKER_NETWORK,
-            private_environment={
-                "MINIO_ACCESS_KEY": os.environ["MINIO_ACCESS_KEY"],
-                "MINIO_SECRET_KEY": os.environ["MINIO_SECRET_KEY"],
-                "BRONZE_BUCKET": os.environ["BRONZE_BUCKET"],
-                "PYTHONPATH": SPARK_PYTHONPATH,
-            },
-            command=[
-                "/opt/spark/bin/spark-submit",
-                (
-                    f"{SPARK_TRANSFORMATION_PATH}/"
-                    "incremental_bronze_to_silver.py"
-                ),
+        return create_spark_submit_operator(
+            task_id=f"bronze_to_silver_{table_name}",
+            project_path=PROJECT_PATH,
+            script_path="/opt/spark/work-dir/silver/run_incremental.py",
+            arguments=[
                 "--table-name",
                 table_name,
                 "--batch-id",
@@ -1105,16 +1051,6 @@ def ecommerce_incremental_ingestion():
                 "--bronze-checksum",
                 xcom_value("bronze_checksum_sha256"),
             ],
-            mounts=[
-                Mount(
-                    source=PROJECT_PATH + r"\transformation",
-                    target=SPARK_TRANSFORMATION_PATH,
-                    type="bind",
-                    read_only=True,
-                ),
-            ],
-            mount_tmp_dir=False,
-            do_xcom_push=False,
             retries=0,
         )
 
@@ -1157,6 +1093,79 @@ def ecommerce_incremental_ingestion():
         do_xcom_push=False,
         retries=0,
 )
+
+    @task.branch(retries=0)
+    def gold_snapshot_gate(warehouse_result: dict, config: dict):
+        """Allow snapshot creation only after a successful controlled WRITE."""
+        if not isinstance(warehouse_result, dict) or not isinstance(config, dict):
+            raise ValueError("Missing Warehouse or pipeline result for Gold gate")
+
+        if config.get("mode") != "WRITE":
+            return "skip_gold_layer"
+
+        if warehouse_result.get("status") != "COMPLETED":
+            return "skip_gold_layer"
+
+        if not is_feature_enabled("GOLD_SNAPSHOT_WRITE_ENABLED"):
+            return "skip_gold_layer"
+
+        return "resolve_gold_snapshot_lineage"
+
+    @task(retries=0)
+    def skip_gold_layer():
+        return {
+            "status": "SKIPPED",
+            "reason": "GOLD_SNAPSHOT_NOT_ENABLED_OR_UPSTREAM_NOT_COMPLETED",
+        }
+
+    @task(retries=0)
+    def resolve_gold_snapshot_lineage():
+        """Resolve deterministic IDs before Spark writes immutable snapshots."""
+        return resolve_silver_snapshot_lineage()
+
+    @task(retries=0)
+    def prepare_gold_dataset_sources(dataset_name: str, silver_snapshots: dict):
+        """Build the exact immutable Silver lineage for one Gold dataset."""
+        return build_gold_source_snapshot_payload(
+            dataset_name,
+            silver_snapshots,
+        )
+
+    def create_snapshot_operator(table_name: str):
+        return create_spark_submit_operator(
+            task_id=f"snapshot_{table_name}",
+            project_path=PROJECT_PATH,
+            script_path="/opt/spark/work-dir/silver/run_snapshot.py",
+            extra_environment={
+                "DB_HOST": "postgres",
+                "DB_PORT": os.environ["DB_PORT"],
+                "DB_NAME": os.environ["DB_NAME"],
+                "DB_USER": os.environ["DB_USER"],
+                "DB_PASSWORD": os.environ["DB_PASSWORD"],
+            },
+            arguments=[
+                "--table-name",
+                table_name,
+            ],
+            extra_mounts=[
+                Mount(source=PROJECT_PATH + r"\ingestion", target="/opt/spark/work-dir/ingestion", type="bind", read_only=True),
+            ],
+            retries=0,
+        )
+
+    def create_gold_operator(dataset_name: str, source_task_id: str):
+        return create_spark_submit_operator(
+            task_id=f"gold_{dataset_name}",
+            project_path=PROJECT_PATH,
+            script_path="/opt/spark/work-dir/gold/run_pipeline.py",
+            arguments=[
+                "--dataset", dataset_name,
+                "--source-snapshots",
+                "{{{{ ti.xcom_pull(task_ids='{}') }}}}".format(source_task_id),
+                "--mode", "DRY_RUN",
+            ],
+            retries=0,
+        )
 
 
     config = validate_config()
@@ -1240,5 +1249,25 @@ def ecommerce_incremental_ingestion():
     skip_dbt_task = skip_dbt()
 
     dbt_eligibility_task >> [dbt_build_task,skip_dbt_task,]
+
+    gold_gate_task = gold_snapshot_gate(warehouse_loader_task, config)
+    gold_skip_task = skip_gold_layer()
+    gold_lineage_task = resolve_gold_snapshot_lineage()
+    gold_gate_task >> [gold_skip_task, gold_lineage_task]
+    dbt_build_task >> gold_gate_task
+
+    snapshot_tasks = {}
+    for table_name in TABLES:
+        snapshot_tasks[table_name] = create_snapshot_operator(table_name)
+        gold_lineage_task >> snapshot_tasks[table_name]
+
+    for dataset_name in GOLD_DATASET_SOURCES:
+        source_task_id = f"gold_sources_{dataset_name}"
+        gold_sources_task = prepare_gold_dataset_sources.override(
+            task_id=source_task_id,
+        )(dataset_name, gold_lineage_task)
+        for source_table in GOLD_DATASET_SOURCES[dataset_name]:
+            snapshot_tasks[source_table] >> gold_sources_task
+        gold_sources_task >> create_gold_operator(dataset_name, source_task_id)
 
 ecommerce_incremental_ingestion()
