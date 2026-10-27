@@ -1,4 +1,6 @@
 from pathlib import Path
+
+from common.runtime_policy import require_feature_enabled
 import os
 from dotenv import load_dotenv
 
@@ -832,10 +834,10 @@ def run_incremental_ingestion_write(
         }
 
     # 3. Require environment-level permission
-    if os.getenv("INGESTION_WRITE_ENABLED", "").lower() != "true":
-        raise RuntimeError(
-            "Write-mode blocked: INGESTION_WRITE_ENABLED=true is required"
-        )
+    require_feature_enabled(
+        "INGESTION_WRITE_ENABLED",
+        "Write-mode blocked: INGESTION_WRITE_ENABLED=true is required",
+    )
 
     # 4. Validate database and transaction mode
     conn = get_db_connection()

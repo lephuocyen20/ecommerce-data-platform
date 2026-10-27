@@ -2,8 +2,12 @@
 
 import os
 
-import psycopg2
 from dotenv import load_dotenv
+from common.database import (
+    assert_current_database,
+    connect_postgres,
+    require_transaction,
+)
 
 load_dotenv()
 
@@ -13,14 +17,8 @@ except ImportError:
     from config import EXPECTED_DB_NAME
 
 
-def require_transaction(conn):
-    """Ensure a caller-owned PostgreSQL transaction is active."""
-    if conn.autocommit:
-        raise ValueError("Autocommit must be disabled")
-
-
 def get_db_connection():
-    conn = psycopg2.connect(
+    conn = connect_postgres(
         host=os.getenv("DB_HOST"),
         port=os.getenv("DB_PORT", "5432"),
         dbname=os.getenv("DB_NAME"),
@@ -28,16 +26,11 @@ def get_db_connection():
         password=os.getenv("DB_PASSWORD"),
     )
 
-    with conn.cursor() as cursor:
-        cursor.execute("SELECT current_database()")
-        actual_db_name = cursor.fetchone()[0]
-
-    if actual_db_name != EXPECTED_DB_NAME:
+    try:
+        assert_current_database(conn, EXPECTED_DB_NAME)
+    except Exception:
         conn.close()
-        raise RuntimeError(
-            f"Unsafe database connection: {actual_db_name}. "
-            f"Expected: {EXPECTED_DB_NAME}"
-        )
+        raise
 
     return conn
 

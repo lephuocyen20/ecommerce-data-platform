@@ -6,23 +6,14 @@ from minio import Minio
 from minio.error import S3Error
 import os
 
-import psycopg2
 from psycopg2.extras import RealDictCursor
-
-
-SUPPORTED_TABLES = (
-    "customers",
-    "products",
-    "orders",
-    "order_items",
-    "payments",
-    "shipments",
-)
+from common.database import connect_postgres
+from common.table_registry import SUPPORTED_TABLES
 
 
 def get_connection():
     """Create a PostgreSQL connection using environment variables."""
-    return psycopg2.connect(
+    return connect_postgres(
         host=os.environ.get("WAREHOUSE_DB_HOST", "localhost"),
         port=int(os.environ.get("WAREHOUSE_DB_PORT", "5432")),
         dbname=os.environ.get("WAREHOUSE_DB_NAME", "ecommerce_test"),

@@ -4,7 +4,7 @@ FROM apache/spark:3.5.6
 USER root
 
 # Python dependencies
-RUN pip install --no-cache-dir minio PyYAML
+RUN pip install --no-cache-dir minio PyYAML psycopg2-binary python-dotenv
 
 # Hadoop S3A dependencies
 ARG HADOOP_AWS_VERSION=3.3.4

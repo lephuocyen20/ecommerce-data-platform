@@ -11,6 +11,12 @@ try:
     from .config import get_table_config
 except ImportError:
     from config import get_table_config
+try:
+    from common.paths import bronze_incremental_object_key
+except ModuleNotFoundError:
+    # Support invoking this legacy module directly from ingestion/incremental.
+    def bronze_incremental_object_key(table_name, batch_id):
+        return f"bronze_incremental/{table_name}/batch_id={batch_id}/data.csv"
 
 
 def build_object_key(table_name, batch_id):
@@ -24,7 +30,7 @@ def build_object_key(table_name, batch_id):
     if validated_batch_id.hex != batch_id:
         raise ValueError("batch_id must be a canonical UUID hex string")
 
-    return f"bronze_incremental/{table_name}/" f"batch_id={batch_id}/data.csv"
+    return bronze_incremental_object_key(table_name, batch_id)
 
 
 def get_minio_client():

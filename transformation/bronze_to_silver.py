@@ -3,16 +3,29 @@ import argparse
 import json
 
 
-from minio import Minio
 from pyspark.sql import SparkSession
 
-from config import BRONZE_BUCKET, MINIO_ENDPOINT
-from transforms.customers import transform_customers
-from transforms.products import transform_products
-from transforms.orders import transform_orders
-from transforms.order_items import transform_order_items
-from transforms.payments import transform_payments
-from transforms.shipments import transform_shipments
+try:
+    from transformation.config import BRONZE_BUCKET, MINIO_ENDPOINT
+    from transformation.transforms.customers import transform_customers
+    from transformation.transforms.products import transform_products
+    from transformation.transforms.orders import transform_orders
+    from transformation.transforms.order_items import transform_order_items
+    from transformation.transforms.payments import transform_payments
+    from transformation.transforms.shipments import transform_shipments
+    from common.minio import (
+        configure_s3a,
+        create_minio_client,
+    )
+except ImportError:
+    from config import BRONZE_BUCKET, MINIO_ENDPOINT
+    from transforms.customers import transform_customers
+    from transforms.products import transform_products
+    from transforms.orders import transform_orders
+    from transforms.order_items import transform_order_items
+    from transforms.payments import transform_payments
+    from transforms.shipments import transform_shipments
+    from common.minio import configure_s3a, create_minio_client
 
 
 def get_latest_bronze_path(client, bucket_name, table):
@@ -34,18 +47,8 @@ def get_latest_bronze_path(client, bucket_name, table):
 
 
 def configure_s3(spark):
-    hadoop_conf = spark.sparkContext._jsc.hadoopConfiguration()
-    hadoop_conf.set("fs.s3a.endpoint", f"http://{MINIO_ENDPOINT}")
-    hadoop_conf.set("fs.s3a.path.style.access", "true")
-    hadoop_conf.set("fs.s3a.connection.ssl.enabled", "false")
-    hadoop_conf.set(
-        "fs.s3a.access.key",
-        os.environ["MINIO_ACCESS_KEY"],
-    )
-    hadoop_conf.set(
-        "fs.s3a.secret.key",
-        os.environ["MINIO_SECRET_KEY"],
-    )
+    """Backward-compatible name for the shared Spark S3A configuration."""
+    configure_s3a(spark)
 
 
 def read_bronze(spark, bronze_path):
@@ -115,12 +118,7 @@ def main():
     try:
         configure_s3(spark)
 
-        client = Minio(
-            MINIO_ENDPOINT,
-            access_key=os.environ["MINIO_ACCESS_KEY"],
-            secret_key=os.environ["MINIO_SECRET_KEY"],
-            secure=False,
-        )
+        client = create_minio_client()
 
         manifest = load_manifest(
             client,

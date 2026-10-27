@@ -13,6 +13,9 @@ services:
     env_file:
       - ../.env
     volumes:
+      - ../common:/opt/spark/work-dir/common:ro
+      - ../silver:/opt/spark/work-dir/silver:ro
+      - ../gold:/opt/spark/work-dir/gold:ro
       - ../transformation:/opt/spark/work-dir/transformation
       - ../validation:/opt/spark/work-dir/validation
     networks:
