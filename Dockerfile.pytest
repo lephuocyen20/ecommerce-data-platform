@@ -1,0 +1,19 @@
+FROM python:3.13-slim
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends openjdk-21-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    "minio==7.2.20" \
+    "psycopg2-binary==2.9.13" \
+    "pyarrow==25.0.1" \
+    "PyYAML==6.0.3" \
+    "pyspark==4.2.0" \
+    "pytest==9.1.1" \
+    "python-dotenv==1.2.4"
+
+ENV PYSPARK_DRIVER_PYTHON=python \
+    PYSPARK_PYTHON=python
+
+WORKDIR /workspace

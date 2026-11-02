@@ -42,7 +42,7 @@ def test_invalid_write_permission_is_rejected():
             allow_write="True",
         )
 
-def test_production_write_remains_disabled():
+def test_enabled_write_validates_database_before_executing():
     from unittest.mock import MagicMock
 
     func = m.run_incremental_ingestion_write
@@ -55,14 +55,17 @@ def test_production_write_remains_disabled():
 
     with patch.dict(
         func.__globals__,
-        {"get_db_connection": lambda: conn},
+        {
+            "get_db_connection": lambda: conn,
+            "_execute_two_transaction_ingestion": lambda **kwargs: {
+                "status": "COMMITTED",
+            },
+        },
     ):
-        with pytest.raises(
-            NotImplementedError,
-            match="Production write-mode is not enabled yet",
-        ):
-            func("products", allow_write=True)
+        with patch.dict("os.environ", {"INGESTION_WRITE_ENABLED": "true"}):
+            result = func("products", allow_write=True)
 
+    assert result == {"status": "COMMITTED", "mode": "WRITE"}
     cursor.execute.assert_called_once_with("SELECT current_database()")
     conn.rollback.assert_called_once()
     conn.close.assert_called_once()
