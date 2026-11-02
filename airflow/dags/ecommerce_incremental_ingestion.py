@@ -4,7 +4,7 @@ import os
 import sys
 from datetime import datetime, timedelta
 
-from airflow.sdk import dag
+from airflow.sdk import TaskGroup, dag
 
 AIRFLOW_PROJECT_PATH = "/opt/airflow/project"
 if AIRFLOW_PROJECT_PATH not in sys.path:
@@ -52,17 +52,39 @@ def ecommerce_incremental_ingestion():
     ingestion_results, validation_results = {}, {}
     eligibility_tasks, silver_skip_tasks = {}, {}
     silver_transform_tasks, silver_verify_tasks, silver_result_tasks = {}, {}, {}
+
     for table_name in TABLES:
         ingestion_results[table_name] = ingest_incremental.override(task_id=f"ingest_{table_name}")(table_name, config)
-        validation_results[table_name] = validate_incremental.override(task_id=f"validate_{table_name}")(table_name, ingestion_results[table_name])
-        eligibility_tasks[table_name] = check_silver_eligibility.override(task_id=f"check_silver_eligibility_{table_name}")(table_name, config, validation_results[table_name])
-        silver_skip_tasks[table_name] = skip_silver.override(task_id=f"skip_silver_{table_name}")(table_name, validation_results[table_name])
-        eligibility_tasks[table_name] >> silver_skip_tasks[table_name]
+
+    # Keep the task IDs stable: branch targets and XCom consumers refer to them
+    # directly, while the groups keep Airflow's graph view readable.
+    with TaskGroup(group_id="bronze_validation", prefix_group_id=False):
+        for table_name in TABLES:
+            validation_results[table_name] = validate_incremental.override(task_id=f"validate_{table_name}")(table_name, ingestion_results[table_name])
+
+    with TaskGroup(group_id="silver_eligibility", prefix_group_id=False):
+        for table_name in TABLES:
+            eligibility_tasks[table_name] = check_silver_eligibility.override(task_id=f"check_silver_eligibility_{table_name}")(table_name, config, validation_results[table_name])
+
+    with TaskGroup(group_id="silver_skip", prefix_group_id=False):
+        for table_name in TABLES:
+            silver_skip_tasks[table_name] = skip_silver.override(task_id=f"skip_silver_{table_name}")(table_name, validation_results[table_name])
+
+    for table_name in TABLES:
         silver_transform_tasks[table_name] = create_silver_transform_operator(table_name)
+
+    with TaskGroup(group_id="silver_verification", prefix_group_id=False):
+        for table_name in TABLES:
+            silver_verify_tasks[table_name] = verify_silver_manifest.override(task_id=f"verify_silver_{table_name}")(table_name, validation_results[table_name])
+
+    with TaskGroup(group_id="silver_result_aggregation", prefix_group_id=False):
+        for table_name in TABLES:
+            silver_result_tasks[table_name] = silver_result.override(task_id=f"silver_result_{table_name}")(table_name, config, validation_results[table_name])
+
+    for table_name in TABLES:
+        eligibility_tasks[table_name] >> silver_skip_tasks[table_name]
         eligibility_tasks[table_name] >> silver_transform_tasks[table_name]
-        silver_verify_tasks[table_name] = verify_silver_manifest.override(task_id=f"verify_silver_{table_name}")(table_name, validation_results[table_name])
         silver_transform_tasks[table_name] >> silver_verify_tasks[table_name]
-        silver_result_tasks[table_name] = silver_result.override(task_id=f"silver_result_{table_name}")(table_name, config, validation_results[table_name])
         silver_skip_tasks[table_name] >> silver_result_tasks[table_name]
         silver_verify_tasks[table_name] >> silver_result_tasks[table_name]
 
