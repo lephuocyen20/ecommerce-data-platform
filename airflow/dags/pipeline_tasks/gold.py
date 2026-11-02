@@ -16,11 +16,9 @@ from pipeline_gold import (
 
 
 @task.branch(retries=0)
-def gold_snapshot_gate(warehouse_result: dict, config: dict):
-    if not isinstance(warehouse_result, dict) or not isinstance(config, dict):
-        raise ValueError("Missing Warehouse or pipeline result for Gold gate")
-    if config.get("mode") != "WRITE":
-        return "skip_gold_layer"
+def gold_snapshot_gate(warehouse_result: dict):
+    if not isinstance(warehouse_result, dict):
+        raise ValueError("Missing Warehouse result for Gold gate")
     if warehouse_result.get("status") != "COMPLETED":
         return "skip_gold_layer"
     if not is_feature_enabled("GOLD_SNAPSHOT_WRITE_ENABLED"):

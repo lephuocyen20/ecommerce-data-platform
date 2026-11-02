@@ -64,7 +64,7 @@ def ecommerce_incremental_ingestion():
 
     with TaskGroup(group_id="silver_eligibility", prefix_group_id=False):
         for table_name in TABLES:
-            eligibility_tasks[table_name] = check_silver_eligibility.override(task_id=f"check_silver_eligibility_{table_name}")(table_name, config, validation_results[table_name])
+            eligibility_tasks[table_name] = check_silver_eligibility.override(task_id=f"check_silver_eligibility_{table_name}")(table_name, validation_results[table_name])
 
     with TaskGroup(group_id="silver_skip", prefix_group_id=False):
         for table_name in TABLES:
@@ -79,7 +79,7 @@ def ecommerce_incremental_ingestion():
 
     with TaskGroup(group_id="silver_result_aggregation", prefix_group_id=False):
         for table_name in TABLES:
-            silver_result_tasks[table_name] = silver_result.override(task_id=f"silver_result_{table_name}")(table_name, config, validation_results[table_name])
+            silver_result_tasks[table_name] = silver_result.override(task_id=f"silver_result_{table_name}")(table_name, validation_results[table_name])
 
     for table_name in TABLES:
         eligibility_tasks[table_name] >> silver_skip_tasks[table_name]
@@ -89,15 +89,14 @@ def ecommerce_incremental_ingestion():
         silver_verify_tasks[table_name] >> silver_result_tasks[table_name]
 
     pipeline_summary_task = pipeline_summary()
-    config >> pipeline_summary_task
     for table_name in TABLES:
         silver_result_tasks[table_name] >> pipeline_summary_task
     warehouse_gate_task = warehouse_gate(pipeline_summary_task)
-    warehouse_loader_task = load_warehouse(warehouse_gate_task, config)
+    warehouse_loader_task = load_warehouse(warehouse_gate_task)
     dbt_eligibility_task = check_dbt_eligibility(warehouse_loader_task)
     dbt_eligibility_task >> [dbt_build_task, skip_dbt()]
 
-    gold_gate_task = gold_snapshot_gate(warehouse_loader_task, config)
+    gold_gate_task = gold_snapshot_gate(warehouse_loader_task)
     gold_skip_task = skip_gold_layer()
     gold_lineage_task = resolve_gold_snapshot_lineage_task()
     gold_gate_task >> [gold_skip_task, gold_lineage_task]

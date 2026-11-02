@@ -14,14 +14,16 @@ from pipeline_silver import get_silver_data_prefix, get_silver_manifest_key
 
 
 @task.branch(retries=0)
-def check_silver_eligibility(table_name, config, validation_result):
-    if table_name not in config["tables"]:
-        raise AirflowSkipException(f"Table {table_name} was not selected")
+def check_silver_eligibility(table_name, validation_result):
     if not isinstance(validation_result, dict):
         raise ValueError("Missing Bronze validation result")
     if validation_result.get("table_name") != table_name:
         raise ValueError("Bronze validation table mismatch")
-    status, reason, mode = (validation_result.get("status"), validation_result.get("reason"), config["mode"])
+    status, reason, mode = (
+        validation_result.get("status"),
+        validation_result.get("reason"),
+        validation_result.get("mode"),
+    )
     if mode == "DRY_RUN":
         if status != "SKIPPED" or reason != "DRY_RUN":
             raise ValueError("Invalid DRY_RUN validation result")
@@ -84,17 +86,16 @@ def verify_silver_manifest(table_name, validation_result):
 
 
 @task(trigger_rule="none_failed_min_one_success", retries=0)
-def silver_result(table_name, config, bronze_result):
-    if table_name not in config["tables"]:
-        raise AirflowSkipException(f"Silver result skipped: table {table_name} not selected")
+def silver_result(table_name, bronze_result):
     ti = get_current_context()["ti"]
     skip_result = ti.xcom_pull(task_ids=f"skip_silver_{table_name}")
     verify_result = ti.xcom_pull(task_ids=f"verify_silver_{table_name}")
     if not isinstance(bronze_result, dict) or bronze_result.get("table_name") != table_name:
         raise ValueError("Bronze table mismatch")
-    if config["mode"] == "DRY_RUN": expected_status, expected_reason = "SKIPPED", "DRY_RUN"
-    elif config["mode"] == "WRITE" and bronze_result.get("status") == "SKIPPED" and bronze_result.get("reason") == "NO_DATA": expected_status, expected_reason = "SKIPPED", "NO_DATA"
-    elif config["mode"] == "WRITE" and bronze_result.get("status") == "PASS": expected_status, expected_reason = "PASS", None
+    mode = bronze_result.get("mode")
+    if mode == "DRY_RUN": expected_status, expected_reason = "SKIPPED", "DRY_RUN"
+    elif mode == "WRITE" and bronze_result.get("status") == "SKIPPED" and bronze_result.get("reason") == "NO_DATA": expected_status, expected_reason = "SKIPPED", "NO_DATA"
+    elif mode == "WRITE" and bronze_result.get("status") == "PASS": expected_status, expected_reason = "PASS", None
     else: raise ValueError("Invalid pipeline Bronze status")
     if expected_status == "SKIPPED":
         if not isinstance(skip_result, dict) or skip_result.get("table_name") != table_name or skip_result.get("status") != "SKIPPED" or skip_result.get("reason") != expected_reason or verify_result is not None:

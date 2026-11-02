@@ -107,14 +107,24 @@ def validate_incremental(table_name: str, ingestion_result: dict):
         ):
             raise ValueError(f"Invalid DRY_RUN ingestion result: {table_name}")
         logger.info("Skipping Bronze validation in DRY_RUN | table=%s", table_name)
-        return {"table_name": table_name, "status": "SKIPPED", "reason": "DRY_RUN"}
+        return {
+            "table_name": table_name,
+            "mode": mode,
+            "status": "SKIPPED",
+            "reason": "DRY_RUN",
+        }
     if mode != WRITE:
         raise ValueError(f"Unexpected ingestion mode: {mode}")
     if status == "NO_DATA":
         if batch_id is not None:
             raise ValueError("NO_DATA must not contain a batch_id")
         logger.info("No incremental batch to validate | table=%s", table_name)
-        return {"table_name": table_name, "status": "SKIPPED", "reason": "NO_DATA"}
+        return {
+            "table_name": table_name,
+            "mode": mode,
+            "status": "SKIPPED",
+            "reason": "NO_DATA",
+        }
     if status != "COMMITTED":
         raise RuntimeError(f"Unexpected ingestion status: {status}")
     if not isinstance(batch_id, str) or not batch_id:
@@ -125,4 +135,4 @@ def validate_incremental(table_name: str, ingestion_result: dict):
     from validation.validate_incremental_bronze import validate_incremental_batch
     result = validate_incremental_batch(table_name=table_name, batch_id=batch_id)
     logger.info("Incremental Bronze validation completed | result=%s", result)
-    return result
+    return {**result, "mode": mode}

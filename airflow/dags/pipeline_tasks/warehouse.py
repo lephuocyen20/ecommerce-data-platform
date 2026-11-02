@@ -51,25 +51,39 @@ def warehouse_gate(summary: dict):
         if not valid:
             raise RuntimeError(f"Warehouse Gate rejected Silver result: {table_name}")
     if mode == "DRY_RUN":
-        return {"status": "SKIP", "reason": "DRY_RUN", "tables": tables}
+        return {
+            "status": "SKIP",
+            "reason": "DRY_RUN",
+            "mode": mode,
+            "tables": tables,
+        }
     ready_tables = [table_name for table_name in tables if results[table_name]["status"] == "PASS"]
     if not ready_tables:
-        return {"status": "SKIP", "reason": "NO_DATA", "tables": tables}
+        return {
+            "status": "SKIP",
+            "reason": "NO_DATA",
+            "mode": mode,
+            "tables": tables,
+        }
     ready_batch_ids = [results[table_name]["batch_id"] for table_name in ready_tables]
     if len(ready_batch_ids) != len(set(ready_batch_ids)):
         raise ValueError("Duplicate Warehouse batch IDs")
-    return {"status": "READY", "reason": "SILVER_VERIFIED", "tables": ready_tables, "batch_ids": ready_batch_ids}
+    return {
+        "status": "READY",
+        "reason": "SILVER_VERIFIED",
+        "mode": mode,
+        "tables": ready_tables,
+        "batch_ids": ready_batch_ids,
+    }
 
 
 @task(retries=0)
-def load_warehouse(gate_result: dict, config: dict):
+def load_warehouse(gate_result: dict):
     """Load verified Silver batches into Warehouse Raw."""
     logger = logging.getLogger("airflow.task")
     if not isinstance(gate_result, dict):
         raise ValueError("Missing Warehouse Gate result")
-    if not isinstance(config, dict):
-        raise ValueError("Missing pipeline configuration")
-    mode, status = config.get("mode"), gate_result.get("status")
+    mode, status = gate_result.get("mode"), gate_result.get("status")
     if mode not in ("DRY_RUN", "WRITE"):
         raise ValueError("Invalid pipeline mode")
     if status == "SKIP":
@@ -90,8 +104,6 @@ def load_warehouse(gate_result: dict, config: dict):
             or any(not isinstance(b, str) or not re.fullmatch(r"[0-9a-f]{32}", b) for b in batch_ids)
             or len(batch_ids) != len(set(batch_ids))):
         raise ValueError("Invalid Warehouse batch selection")
-    if not set(tables).issubset(set(config.get("tables", []))):
-        raise ValueError("Warehouse tables exceed DAG selection")
     if not is_feature_enabled("WAREHOUSE_WRITE_ENABLED"):
         logger.info("Warehouse WRITE disabled | tables=%s | batches=%s", tables, batch_ids)
         return {"status": "SKIPPED", "reason": "WAREHOUSE_WRITE_DISABLED", "tables": tables, "batch_ids": batch_ids}
