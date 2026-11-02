@@ -12,6 +12,104 @@ SPARK_WORKDIR = "/opt/spark/work-dir"
 TRANSFORMATION_TARGET = f"{SPARK_WORKDIR}/transformation"
 
 
+def create_incremental_silver_operator(*, table_name, project_path):
+    """Create the Bronze-to-Silver operator for one validated table batch."""
+    validation_task_id = f"validate_{table_name}"
+
+    def xcom_value(field):
+        return (
+            "{{ ti.xcom_pull(task_ids='"
+            + validation_task_id
+            + "')['"
+            + field
+            + "'] }}"
+        )
+
+    return create_spark_submit_operator(
+        task_id=f"bronze_to_silver_{table_name}",
+        project_path=project_path,
+        script_path=f"{SPARK_WORKDIR}/silver/run_incremental.py",
+        arguments=[
+            "--table-name", table_name,
+            "--batch-id", xcom_value("batch_id"),
+            "--object-key", xcom_value("object_key"),
+            "--bronze-checksum", xcom_value("bronze_checksum_sha256"),
+        ],
+        retries=0,
+    )
+
+
+def create_dbt_build_operator(*, project_path):
+    """Create the dbt build task used after a successful Warehouse load."""
+    return DockerOperator(
+        task_id="dbt_build",
+        image="ecommerce-data-platform-dbt-runner:latest",
+        network_mode=DOCKER_NETWORK,
+        command=["build"],
+        private_environment={
+            "DBT_HOST": "postgres",
+            "DBT_PORT": "5432",
+            "DBT_NAME": os.environ["WAREHOUSE_DB_NAME"],
+            "DBT_USER": os.environ["WAREHOUSE_DB_USER"],
+            "DBT_PASSWORD": os.environ["WAREHOUSE_DB_PASSWORD"],
+            "DBT_PROFILES_DIR": "/app/profiles",
+        },
+        mounts=[
+            Mount(
+                source=project_path + r"\warehouse\ecommerce_dbt",
+                target="/app",
+                type="bind",
+            ),
+            Mount(
+                source=project_path + r"\warehouse\dbt_profiles",
+                target="/app/profiles",
+                type="bind",
+                read_only=True,
+            ),
+        ],
+        working_dir="/app",
+        mount_tmp_dir=False,
+        do_xcom_push=False,
+        retries=0,
+    )
+
+
+def create_silver_snapshot_operator(*, table_name, project_path, database_environment):
+    """Create the immutable Silver snapshot task for one table."""
+    return create_spark_submit_operator(
+        task_id=f"snapshot_{table_name}",
+        project_path=project_path,
+        script_path=f"{SPARK_WORKDIR}/silver/run_snapshot.py",
+        extra_environment=database_environment,
+        arguments=["--table-name", table_name],
+        extra_mounts=[
+            Mount(
+                source=project_path + r"\ingestion",
+                target=f"{SPARK_WORKDIR}/ingestion",
+                type="bind",
+                read_only=True,
+            ),
+        ],
+        retries=0,
+    )
+
+
+def create_gold_validation_operator(*, dataset_name, source_task_id, project_path):
+    """Create the read-only Gold validation task for one Gold dataset."""
+    return create_spark_submit_operator(
+        task_id=f"gold_{dataset_name}",
+        project_path=project_path,
+        script_path=f"{SPARK_WORKDIR}/gold/run_pipeline.py",
+        arguments=[
+            "--dataset", dataset_name,
+            "--source-snapshots",
+            "{{{{ ti.xcom_pull(task_ids='{}') }}}}".format(source_task_id),
+            "--mode", "DRY_RUN",
+        ],
+        retries=0,
+    )
+
+
 def create_spark_submit_operator(
     *,
     task_id,
