@@ -36,3 +36,15 @@ silver/snapshots/test_snapshot_object_discovery.py
 
 # Test-generated logs
 *.log
+
+# Local project-report and presentation materials
+/presentation/
+/tools/
+/docs/CORE_PROJECT_MECHANISMS.md
+/docs/DEMO_SCRIPT.md
+/docs/END_TO_END_EXECUTION_FLOW.md
+/docs/LUONG_CHI_TIET_DU_LIEU_ECOMMERCE.md
+/docs/PRESENTATION_SCRIPT.md
+/docs/FUNCTION_REFERENCE.md
+/docs/GLOSSARY.md
+/docs/CLEANUP_CANDIDATES.md
