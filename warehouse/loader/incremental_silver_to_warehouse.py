@@ -16,7 +16,7 @@ def get_connection():
     return connect_postgres(
         host=os.environ.get("WAREHOUSE_DB_HOST", "localhost"),
         port=int(os.environ.get("WAREHOUSE_DB_PORT", "5432")),
-        dbname=os.environ.get("WAREHOUSE_DB_NAME", "ecommerce_test"),
+        dbname=os.environ.get("WAREHOUSE_DB_NAME", "ecommerce_platform"),
         user=os.environ.get("WAREHOUSE_DB_USER", "ecommerce_user"),
         password=os.environ["WAREHOUSE_DB_PASSWORD"],
     )

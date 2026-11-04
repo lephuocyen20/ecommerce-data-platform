@@ -3,7 +3,7 @@
 sources:
   - name: ecommerce_raw
     description: "Verified Silver data loaded into PostgreSQL Raw Warehouse."
-    database: ecommerce_test
+    database: ecommerce_platform
     schema: raw
 
     tables:

@@ -37,7 +37,7 @@ TABLE_CONFIG = {
     },
 }
 
-EXPECTED_DB_NAME = "ecommerce_test"
+EXPECTED_DB_NAME = "ecommerce_platform"
 RECOVERABLE_STATUSES = ("PENDING", "UPLOADED")
 BLOCKING_STATUSES = (*RECOVERABLE_STATUSES, "FAILED")
 VALID_BATCH_ID = re.compile(r"[0-9a-f]{32}")

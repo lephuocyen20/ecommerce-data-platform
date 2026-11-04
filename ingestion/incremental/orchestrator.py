@@ -514,8 +514,10 @@ def persist_new_pending_batch(
             cursor.execute("SELECT current_database()")
             actual_database = cursor.fetchone()[0]
 
-        if actual_database != "ecommerce_test":
-            raise RuntimeError("Refusing to write outside ecommerce_test")
+        if actual_database != EXPECTED_DB_NAME:
+            raise RuntimeError(
+                f"Refusing to write outside {EXPECTED_DB_NAME}"
+            )
 
         result = execute_new_batch(
             conn=conn,
@@ -596,7 +598,7 @@ def _execute_two_transaction_ingestion(
             cur.execute("SELECT current_database()")
             database = cur.fetchone()[0]
 
-        if database != "ecommerce_test":
+        if database != EXPECTED_DB_NAME:
             raise RuntimeError(f"Write blocked for database: {database}")
 
         client = get_minio_client()
@@ -693,7 +695,7 @@ def _execute_two_transaction_ingestion(
             cur.execute("SELECT current_database()")
             database = cur.fetchone()[0]
 
-        if database != "ecommerce_test":
+        if database != EXPECTED_DB_NAME:
             raise RuntimeError(f"Write blocked for database: {database}")
 
         # Acquire a new transaction-scoped advisory lock.
@@ -803,7 +805,7 @@ def run_incremental_ingestion_write(
     Requires:
         - allow_write=True
         - INGESTION_WRITE_ENABLED=true
-        - PostgreSQL database ecommerce_test
+        - PostgreSQL database ecommerce_platform
         - autocommit=False
 
     Executes the existing two-transaction ingestion workflow.

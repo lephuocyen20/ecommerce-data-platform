@@ -1,5 +1,5 @@
 
-"""Gold production runner - Phase A: read-only DRY_RUN."""
+"""Gold runner supporting read-only validation and immutable publication."""
 
 import argparse
 import json
@@ -42,6 +42,18 @@ from gold.implementation.quality.payment_summary import (
     validate_payment_summary_output,
 )
 from common.minio import configure_s3a, create_minio_client
+from common.runtime_policy import DRY_RUN, WRITE, require_feature_enabled
+from gold.implementation.fencing import (
+    generate_gold_attempt_id,
+    validate_publication_eligibility,
+)
+from gold.implementation.ownership import acquire_gold_ownership
+from gold.implementation.preflight import run_gold_preflight
+from gold.implementation.storage.manifest import build_gold_manifest
+from gold.implementation.storage.objects import discover_gold_parquet_objects
+from gold.implementation.storage.publisher import publish_gold_snapshot
+from gold.implementation.storage.recovery import execute_gold_recovery
+from gold.implementation.storage.writer import write_gold_snapshot_parquet
 
 
 DATASET_HANDLERS = {
@@ -83,8 +95,8 @@ def parse_args():
     )
     parser.add_argument(
         "--mode",
-        choices=["DRY_RUN"],
-        default="DRY_RUN",
+        choices=[DRY_RUN, WRITE],
+        default=DRY_RUN,
     )
 
     return parser.parse_args()
@@ -117,7 +129,164 @@ def validate_snapshot_config(dataset_name, raw_json):
     return snapshots
 
 
-def run_dataset(spark, client, bucket, dataset_name, snapshots):
+def _write_gold_snapshot(
+    spark,
+    client,
+    bucket,
+    dataset_name,
+    snapshots,
+    gold_df,
+    row_count,
+):
+    """Write, verify, and publish an immutable Gold snapshot."""
+    preflight = run_gold_preflight(
+        spark=spark,
+        client=client,
+        bucket=bucket,
+        dataset_name=dataset_name,
+        source_snapshots=snapshots,
+    )
+
+    if preflight["status"] == "VERIFIED_EXISTING":
+        return {
+            "snapshot_id": preflight["selected_snapshot_id"],
+            "manifest_key": None,
+            "storage_written": False,
+            "published": True,
+            "publication_status": "ALREADY_PUBLISHED",
+        }
+
+    if preflight["action"] not in {
+        "NEW_SNAPSHOT_CANDIDATE",
+        "REQUIRES_RECOVERY",
+    }:
+        raise RuntimeError(
+            "Gold WRITE blocked by preflight: "
+            f"{preflight['reason']}"
+        )
+
+    snapshot_id = preflight["deterministic_snapshot_id"]
+    contract = get_gold_contract(dataset_name)
+
+    with acquire_gold_ownership(dataset_name, snapshot_id) as ownership:
+        attempt = ownership.allocate_fencing_token(
+            generate_gold_attempt_id()
+        )
+        ownership.assert_alive()
+        validate_publication_eligibility(
+            attempt,
+            attempt.fencing_token,
+            ownership_alive=True,
+        )
+
+        # Kiểm tra lại trạng thái khi đang giữ execution lock.
+        preflight = run_gold_preflight(
+            spark=spark,
+            client=client,
+            bucket=bucket,
+            dataset_name=dataset_name,
+            source_snapshots=snapshots,
+        )
+
+        if preflight["status"] == "VERIFIED_EXISTING":
+            return {
+                "snapshot_id": preflight["selected_snapshot_id"],
+                "manifest_key": None,
+                "storage_written": False,
+                "published": True,
+                "publication_status": "ALREADY_PUBLISHED",
+                "attempt_id": attempt.attempt_id,
+                "fencing_token": attempt.fencing_token,
+            }
+
+        if preflight["action"] == "NEW_SNAPSHOT_CANDIDATE":
+            write_result = write_gold_snapshot_parquet(
+                spark=spark,
+                gold_df=gold_df,
+                bucket=bucket,
+                dataset_name=dataset_name,
+                snapshot_id=snapshot_id,
+            )
+            storage_written = True
+        elif preflight["action"] == "REQUIRES_RECOVERY":
+            from gold.implementation.storage.contract import get_gold_storage_paths
+
+            write_result = {
+                "snapshot_id": snapshot_id,
+                **get_gold_storage_paths(dataset_name, snapshot_id),
+            }
+            storage_written = False
+        else:
+            raise RuntimeError(
+                "Gold WRITE state changed while acquiring ownership: "
+                f"{preflight['reason']}"
+            )
+
+        parquet_objects = discover_gold_parquet_objects(
+            client=client,
+            bucket=bucket,
+            data_prefix=write_result["data_prefix"],
+        )
+        manifest = build_gold_manifest(
+            dataset_name=dataset_name,
+            snapshot_id=snapshot_id,
+            source_snapshots=snapshots,
+            row_count=row_count,
+            schema=contract["columns"],
+            parquet_objects=parquet_objects,
+        )
+
+        ownership.assert_alive()
+        validate_publication_eligibility(
+            attempt,
+            attempt.fencing_token,
+            ownership_alive=True,
+        )
+
+        if storage_written:
+            publication = publish_gold_snapshot(
+                spark=spark,
+                client=client,
+                bucket=bucket,
+                manifest=manifest,
+            )
+        else:
+            publication = execute_gold_recovery(
+                spark=spark,
+                client=client,
+                bucket=bucket,
+                dataset_name=dataset_name,
+                snapshot_id=snapshot_id,
+                candidate_manifest=manifest,
+            )
+
+        return {
+            "snapshot_id": snapshot_id,
+            "manifest_key": manifest["manifest_key"],
+            "storage_written": storage_written,
+            "published": publication["status"] in {
+                "PUBLISHED",
+                "ALREADY_PUBLISHED",
+            },
+            "publication_status": publication["status"],
+            "attempt_id": attempt.attempt_id,
+            "fencing_token": attempt.fencing_token,
+        }
+
+
+def run_dataset(
+    spark,
+    client,
+    bucket,
+    dataset_name,
+    snapshots,
+    mode=DRY_RUN,
+):
+    if mode not in {DRY_RUN, WRITE}:
+        raise ValueError(f"Unsupported Gold mode: {mode}")
+    if mode == WRITE:
+        require_feature_enabled("GOLD_SNAPSHOT_WRITE_ENABLED")
+
     contract = get_gold_contract(dataset_name)
 
     sources = read_gold_sources(
@@ -170,7 +339,7 @@ def run_dataset(spark, client, bucket, dataset_name, snapshots):
 
         result = {
             "status": "PASS",
-            "mode": "DRY_RUN",
+            "mode": mode,
             "dataset_name": dataset_name,
             "source_snapshots": snapshots,
             "row_count": row_count,
@@ -195,6 +364,19 @@ def run_dataset(spark, client, bucket, dataset_name, snapshots):
 
             result["payment_count"] = payment_count
 
+        if mode == WRITE:
+            result.update(
+                _write_gold_snapshot(
+                    spark=spark,
+                    client=client,
+                    bucket=bucket,
+                    dataset_name=dataset_name,
+                    snapshots=snapshots,
+                    gold_df=gold_df,
+                    row_count=row_count,
+                )
+            )
+
         return result
 
     finally:
@@ -203,9 +385,6 @@ def run_dataset(spark, client, bucket, dataset_name, snapshots):
 
 def main():
     args = parse_args()
-
-    if args.mode != "DRY_RUN":
-        raise ValueError("Only DRY_RUN is supported")
 
     snapshots = validate_snapshot_config(
         args.dataset,
@@ -233,6 +412,7 @@ def main():
             bucket=os.environ["BRONZE_BUCKET"],
             dataset_name=args.dataset,
             snapshots=snapshots,
+            mode=args.mode,
         )
 
         print(

@@ -11,7 +11,7 @@ if AIRFLOW_PROJECT_PATH not in sys.path:
     sys.path.insert(0, AIRFLOW_PROJECT_PATH)
 
 from pipeline_contracts import GOLD_DATASET_SOURCES, TABLES
-from pipeline_operators import (create_dbt_build_operator, create_gold_validation_operator, create_incremental_silver_operator, create_silver_snapshot_operator)
+from pipeline_operators import (create_dbt_build_operator, create_gold_write_operator, create_incremental_silver_operator, create_silver_snapshot_operator)
 from pipeline_tasks.gold import (gold_snapshot_gate, prepare_gold_dataset_sources_task, resolve_gold_snapshot_lineage_task, skip_gold_layer)
 from pipeline_tasks.ingestion import ingest_incremental, validate_config, validate_incremental
 from pipeline_tasks.silver import (check_silver_eligibility, pipeline_summary, silver_result, skip_silver, verify_silver_manifest)
@@ -46,7 +46,7 @@ def ecommerce_incremental_ingestion():
         )
 
     def create_gold_operator(dataset_name, source_task_id):
-        return create_gold_validation_operator(dataset_name=dataset_name, source_task_id=source_task_id, project_path=PROJECT_PATH)
+        return create_gold_write_operator(dataset_name=dataset_name, source_task_id=source_task_id, project_path=PROJECT_PATH)
 
     config = validate_config()
     ingestion_results, validation_results = {}, {}
