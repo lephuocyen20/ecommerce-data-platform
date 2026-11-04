@@ -2,7 +2,7 @@ services:
   spark:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: spark/Dockerfile
     image: ecommerce-spark:3.5.6
     environment:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
@@ -11,13 +11,14 @@ services:
     container_name: ecommerce-spark
     command: sleep infinity
     env_file:
-      - ../.env
+      - .env
     volumes:
-      - ../common:/opt/spark/work-dir/common:ro
-      - ../silver:/opt/spark/work-dir/silver:ro
-      - ../gold:/opt/spark/work-dir/gold:ro
-      - ../transformation:/opt/spark/work-dir/transformation
-      - ../validation:/opt/spark/work-dir/validation
+      - ./common:/opt/spark/work-dir/common:ro
+      - ./ingestion:/opt/spark/work-dir/ingestion:ro
+      - ./silver:/opt/spark/work-dir/silver:ro
+      - ./gold:/opt/spark/work-dir/gold:ro
+      - ./transformation:/opt/spark/work-dir/transformation
+      - ./validation:/opt/spark/work-dir/validation
     networks:
       - ecommerce-network
 

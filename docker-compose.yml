@@ -18,7 +18,7 @@ x-airflow-common: &airflow-common
 
     DB_HOST: postgres
     DB_PORT: "5432"
-    DB_NAME: ecommerce_test
+    DB_NAME: ${DB_NAME:-ecommerce_platform}
     DB_USER: ecommerce_user
     DB_PASSWORD: ${DB_PASSWORD}
 
@@ -46,13 +46,15 @@ services:
     container_name: ecommerce-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ecommerce
+      POSTGRES_DB: ${DB_NAME:-ecommerce_platform}
       POSTGRES_USER: ecommerce_user
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      AIRFLOW_DB_NAME: ${AIRFLOW_DB_NAME:-airflow}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./source/database/00-create-airflow-database.sh:/docker-entrypoint-initdb.d/00-create-airflow-database.sh:ro
       - ./source/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
 
   minio:
@@ -77,7 +79,7 @@ services:
       DBT_PROFILES_DIR: /app/profiles
       DBT_HOST: postgres
       DBT_PORT: "5432"
-      DBT_NAME: ecommerce_test
+      DBT_NAME: ${DB_NAME:-ecommerce_platform}
       DBT_USER: ${DB_USER}
       DBT_PASSWORD: ${DB_PASSWORD}
     volumes:
@@ -126,8 +128,8 @@ services:
     <<: *airflow-common
     environment:
       <<: *airflow-common-env
-      WAREHOUSE_WRITE_ENABLED: "false"
-      GOLD_SNAPSHOT_WRITE_ENABLED: ${GOLD_SNAPSHOT_WRITE_ENABLED:-false}
+      WAREHOUSE_WRITE_ENABLED: "true"
+      GOLD_SNAPSHOT_WRITE_ENABLED: ${GOLD_SNAPSHOT_WRITE_ENABLED:-true}
       WAREHOUSE_DB_HOST: postgres
       WAREHOUSE_DB_PORT: ${DB_PORT}
       WAREHOUSE_DB_NAME: ${DB_NAME}

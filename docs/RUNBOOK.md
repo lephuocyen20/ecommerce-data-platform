@@ -12,7 +12,7 @@ Chạy lệnh từ thư mục gốc repository bằng PowerShell. Pipeline incre
 - Docker Desktop đang chạy; tài khoản chạy Docker phải truy cập được Docker socket.
 - Python virtual environment chỉ cần khi chạy generator, batch pipeline hoặc test trên host.
 - Tạo `.env` từ `.env.example`, điền secret thật và **không commit** file này.
-- `DB_NAME` phải là `ecommerce_test`. Đây là database được incremental ingestion,
+- `DB_NAME` phải là `ecommerce_platform`. Đây là database được incremental ingestion,
   Warehouse và dbt sử dụng trong cấu hình hiện tại.
 - Các biến `WAREHOUSE_DB_*` của Airflow phải trỏ tới cùng database với `DB_*`.
 
@@ -21,7 +21,7 @@ Các biến quan trọng:
 ```text
 DB_HOST=localhost
 DB_PORT=5432
-DB_NAME=ecommerce_test
+DB_NAME=ecommerce_platform
 DB_USER=ecommerce_user
 DB_PASSWORD=<secret>
 
@@ -39,7 +39,7 @@ WAREHOUSE_WRITE_ENABLED=true
 `docker-compose.yml`; đây là chốt bảo vệ độc lập với `INGESTION_WRITE_ENABLED`.
 
 > PostgreSQL chỉ chạy script khởi tạo trong `source/database/` khi named volume được
-> tạo lần đầu. Khi dựng mới, phải có schema cho `ecommerce_test`, bao gồm Raw Warehouse
+> tạo lần đầu. Khi dựng mới, phải có schema cho `ecommerce_platform`, bao gồm Raw Warehouse
 > và `warehouse.loaded_batches`, trước khi chạy pipeline. Không xoá volume hiện có nếu
 > chưa sao lưu dữ liệu cần giữ.
 
@@ -157,6 +157,23 @@ Loader upsert vào Raw Warehouse và ghi checkpoint vào `warehouse.loaded_batch
 cùng transaction; lỗi sẽ rollback. dbt chỉ chạy sau khi loader trả `COMPLETED` và
 checkpoint được kiểm tra lại.
 
+### Gold snapshot WRITE
+
+Gold chỉ publish snapshot khi `GOLD_SNAPSHOT_WRITE_ENABLED=true`. Với database đã được tạo
+trước khi Gold WRITE được bổ sung, áp dụng hai migration fencing một lần trước khi trigger DAG:
+
+```powershell
+Get-Content source/database/migrations/001_create_gold_execution_fencing.sql |
+  docker exec -i ecommerce-postgres psql -U ecommerce_user -d <database-name>
+Get-Content source/database/migrations/002_create_gold_execution_attempt_history.sql |
+  docker exec -i ecommerce-postgres psql -U ecommerce_user -d <database-name>
+```
+
+Khi flag được bật và Warehouse/dbt hoàn tất, mỗi Gold dataset sẽ kiểm tra source snapshot,
+lấy advisory lock + fencing token, ghi Parquet bất biến, xác minh checksum/schema/primary key,
+rồi mới publish `manifest.json`. Snapshot cùng lineage đã publish chỉ được xác minh lại và trả về
+`ALREADY_PUBLISHED`; không bị ghi đè.
+
 Sau WRITE, tắt lại `WAREHOUSE_WRITE_ENABLED` (và `INGESTION_WRITE_ENABLED` nếu không cần),
 recreate Airflow services, rồi lưu run ID và log cho audit.
 
@@ -181,22 +198,7 @@ các batch pending ngoài phạm vi một DAG run, nên không thay thế workfl
 .\.venv\Scripts\python.exe warehouse\loader\warehouse_orchestrator.py --dry-run
 ```
 
-## 6. Batch pipeline cũ (Bronze/Silver)
-
-Luồng batch vẫn chạy độc lập khi cần kiểm tra dữ liệu lịch sử:
-
-```powershell
-.\.venv\Scripts\python.exe ingestion\postgres_to_minio.py
-.\.venv\Scripts\python.exe validation\validate_bronze.py
-
-docker exec -w /opt/spark/work-dir ecommerce-spark spark-submit --packages org.apache.hadoop:hadoop-aws:3.3.4 transformation/bronze_to_silver.py --manifest-key <manifest-key>
-docker exec -w /opt/spark/work-dir ecommerce-spark spark-submit --packages org.apache.hadoop:hadoop-aws:3.3.4 validation/validate_silver_optimized.py
-```
-
-`<manifest-key>` có dạng `manifests/<run-id>/bronze.json`. `ecommerce_pipeline` chạy
-theo lịch `0 19 * * *`; nó độc lập với flow incremental và Warehouse/dbt controls.
-
-## 7. Chẩn đoán và dừng dịch vụ
+## 6. Chẩn đoán và dừng dịch vụ
 
 ```powershell
 docker compose ps

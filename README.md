@@ -196,6 +196,7 @@ WRITE mode requires explicit table selection and appropriate environment permiss
 
 - `INGESTION_WRITE_ENABLED=true`
 - `WAREHOUSE_WRITE_ENABLED=true`
+- `GOLD_SNAPSHOT_WRITE_ENABLED=true` (chỉ khi muốn publish Gold snapshot)
 
 These controls are intended to prevent accidental data modifications during development and testing.
 
@@ -304,7 +305,6 @@ docker compose ps
 
 | DAG | Purpose | Schedule |
 |---|---|---|
-| `ecommerce_pipeline` | Existing batch pipeline | `0 19 * * *` |
 | `ecommerce_incremental_ingestion` | Incremental ingestion and downstream processing | Manual |
 
 The incremental DAG defaults to `DRY_RUN`. WRITE execution requires explicit configuration and should only be enabled after reviewing the operational runbook.
@@ -314,9 +314,9 @@ The incremental DAG defaults to `DRY_RUN`. WRITE execution requires explicit con
 After a successful `WRITE` run has loaded the warehouse and completed `dbt
 build`, `ecommerce_incremental_ingestion` can create immutable Silver snapshots
 and validate all four Gold marts. Set `GOLD_SNAPSHOT_WRITE_ENABLED=true` on the
-Airflow scheduler before triggering that run. The Gold runner itself remains
-`DRY_RUN`: it validates lineage, source quality, output quality and grain, but
-does not yet publish Gold data.
+Airflow scheduler before triggering that run. Gold WRITE validates lineage,
+source quality, output quality and grain; it then acquires a fencing lock,
+writes immutable Parquet, verifies the snapshot and publishes its manifest.
 
 The Airflow Graph shows the exact lineage through `snapshot_*` and
 `gold_sources_*` tasks:

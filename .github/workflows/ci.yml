@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  COMPOSE_PROJECT_NAME: ecommerce-ci
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: ecommerce_platform
+  DB_USER: ecommerce_user
+  DB_PASSWORD: ecommerce_pass
+  WAREHOUSE_DB_HOST: postgres
+  WAREHOUSE_DB_PORT: "5432"
+  WAREHOUSE_DB_NAME: ecommerce_platform
+  WAREHOUSE_DB_USER: ecommerce_user
+  WAREHOUSE_DB_PASSWORD: ecommerce_pass
+  POSTGRES_PASSWORD: ecommerce_pass
+  AIRFLOW_DB_HOST: postgres
+  AIRFLOW_DB_PORT: "5432"
+  AIRFLOW_DB_NAME: airflow
+  AIRFLOW_DB_USER: ecommerce_user
+  AIRFLOW_DB_PASSWORD: ecommerce_pass
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ACCESS_KEY: minioadmin
+  MINIO_SECRET_KEY: minioadmin123
+  MINIO_ROOT_USER: minioadmin
+  MINIO_ROOT_PASSWORD: minioadmin123
+  BRONZE_BUCKET: ecommerce-data-lake
+  INGESTION_WRITE_ENABLED: "false"
+
+jobs:
+  test:
+    name: Python and Spark tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build test image
+        run: docker build --tag ecommerce-pytest:ci --file Dockerfile.pytest .
+
+      - name: Start integration-test services
+        run: |
+          docker compose up --detach postgres minio
+          for attempt in {1..30}; do
+            if docker compose exec --no-TTY postgres pg_isready --username "$DB_USER" --dbname "$DB_NAME"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs postgres
+          exit 1
+
+      - name: Compile Python modules
+        run: >-
+          docker run --rm
+          --mount type=bind,source="$GITHUB_WORKSPACE",target=/workspace,readonly
+          --workdir /workspace
+          ecommerce-pytest:ci
+          python -m compileall -q airflow/dags common gold ingestion silver source transformation validation warehouse
+
+      - name: Run test suite
+        run: >-
+          docker run --rm
+          --mount type=bind,source="$GITHUB_WORKSPACE",target=/workspace,readonly
+          --network ecommerce-ci_default
+          --workdir /workspace
+          --env PYTHONPATH
+          --env DB_HOST --env DB_PORT --env DB_NAME --env DB_USER --env DB_PASSWORD
+          --env WAREHOUSE_DB_HOST --env WAREHOUSE_DB_PORT --env WAREHOUSE_DB_NAME
+          --env WAREHOUSE_DB_USER --env WAREHOUSE_DB_PASSWORD
+          --env MINIO_ENDPOINT --env MINIO_ACCESS_KEY --env MINIO_SECRET_KEY --env BRONZE_BUCKET
+          --env INGESTION_WRITE_ENABLED
+          ecommerce-pytest:ci
+          python -m pytest -q -p no:cacheprovider
+
+      - name: Stop integration-test services
+        if: always()
+        run: docker compose down --volumes --remove-orphans

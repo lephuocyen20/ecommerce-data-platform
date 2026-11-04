@@ -210,11 +210,10 @@ dbt tests validate defined model constraints and data quality expectations.
 
 Apache Airflow coordinates pipeline execution.
 
-The repository includes two principal processing DAGs:
+The repository operates one principal processing DAG:
 
 | DAG | Purpose | Schedule |
 |---|---|---|
-| `ecommerce_pipeline` | Original batch pipeline | `0 19 * * *` |
 | `ecommerce_incremental_ingestion` | Controlled incremental pipeline | Manual |
 
 ### 9.1 Incremental DAG Execution Flow
