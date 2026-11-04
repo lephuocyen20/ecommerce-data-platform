@@ -9,7 +9,12 @@ def parse_args():
     parser.add_argument("--months", type=int, default=12)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--stage", choices=["master", "orders", "payments", "shipments"], required=True)
-    parser.add_argument("--insert", action="store_true", help="Persist generated records to ecommerce_test")
+    parser.add_argument("--insert", action="store_true", help="Persist generated records to ecommerce_platform")
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help="Thêm master data, orders, payments hoặc shipments vào dataset hiện có",
+    )
     args = parser.parse_args()
     if min(args.customers, args.products, args.orders, args.months) <= 0:
         parser.error("--customers, --products, --orders and --months must be positive")

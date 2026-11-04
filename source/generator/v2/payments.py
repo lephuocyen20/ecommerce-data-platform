@@ -62,23 +62,41 @@ def generate_refund_payment_timeline(order_date, order_updated_at, end_date):
     success_time = order_date + timedelta(minutes=random.randint(1, 10))
     if success_time > order_updated_at:
         raise RuntimeError("Payment SUCCESS after order cancellation")
-    refund_time = order_updated_at + timedelta(minutes=random.randint(1, 60))
-    if refund_time > end_date:
-        raise RuntimeError("Payment REFUNDED after reference date")
+    refund_time = min(
+        order_updated_at + timedelta(minutes=random.randint(1, 60)),
+        end_date,
+    )
+    if refund_time <= success_time:
+        raise RuntimeError("Payment REFUNDED before payment success")
     return [success_time, refund_time]
 
 
 def _payment_times(order_id, status, method, order_date, updated_at, statuses):
+    business_updated_at = min(updated_at, REFERENCE_DATE)
     if statuses == ["SUCCESS", "REFUNDED"]:
-        return generate_refund_payment_timeline(order_date, updated_at, REFERENCE_DATE)
+        return generate_refund_payment_timeline(
+            order_date,
+            business_updated_at,
+            REFERENCE_DATE,
+        )
     if method == "COD":
-        return generate_cod_payment_timeline(order_date, updated_at, statuses, REFERENCE_DATE)
+        return generate_cod_payment_timeline(
+            order_date,
+            business_updated_at,
+            statuses,
+            REFERENCE_DATE,
+        )
     if status in ("PENDING", "CANCELLED") and statuses == ["PENDING"] or (
         status == "CANCELLED" and statuses == ["FAILED"] and updated_at == order_date
     ):
         return [order_date]
     try:
-        return generate_online_payment_timeline(order_date, updated_at, statuses, REFERENCE_DATE)
+        return generate_online_payment_timeline(
+            order_date,
+            business_updated_at,
+            statuses,
+            REFERENCE_DATE,
+        )
     except RuntimeError as exc:
         raise RuntimeError(f"Order {order_id}: {exc}") from exc
 
@@ -127,16 +145,30 @@ def _validate_records(records, orders):
     print("DQ 01-12: PASS")
 
 
-def generate_payments(cursor):
-    cursor.execute("""
+def generate_payments(cursor, only_missing=False):
+    query = """
         SELECT o.order_id, o.status, o.order_date, o.updated_at,
                SUM(oi.quantity * oi.unit_price - oi.discount_amount) AS order_amount
         FROM orders o JOIN order_items oi ON o.order_id = oi.order_id
+    """
+    if only_missing:
+        query += """
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM payments p
+            WHERE p.order_id = o.order_id
+        )
+        """
+    query += """
         GROUP BY o.order_id, o.status, o.order_date, o.updated_at
         ORDER BY o.order_date
-    """)
+    """
+    cursor.execute(query)
     orders = cursor.fetchall()
     if not orders:
+        if only_missing:
+            print("NO_DATA: No orders require new payments")
+            return []
         raise RuntimeError("No orders available for payments generation")
     print(f"Loaded {len(orders)} orders for payments")
     records = []
@@ -159,12 +191,12 @@ def generate_payments(cursor):
 
     return records
 
-def insert_payments(cursor, records):
+def insert_payments(cursor, records, allow_append=False):
     if not records:
         raise RuntimeError("No payment records to insert")
 
     cursor.execute("SELECT COUNT(*) FROM payments")
-    if cursor.fetchone()[0] != 0:
+    if cursor.fetchone()[0] != 0 and not allow_append:
         raise RuntimeError("Payments already exist. Refusing duplicate INSERT.")
 
     query = """

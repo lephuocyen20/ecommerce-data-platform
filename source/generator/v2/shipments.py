@@ -187,14 +187,15 @@ def validate_shipments(records, orders, paid_order_ids):
             )
         # DQ 11: Shipment created before Order completion
         if order_status == "DELIVERED":
-            if created > order_updated_at:
+            completion_time = min(order_updated_at, REFERENCE_DATE)
+            if created > completion_time:
                 raise RuntimeError(
                     f"DQ 11 FAILED: Shipment created after order completion {order_id}"
                 )
 
         # DQ 12: Delivered timeline consistency
         if order_status == "DELIVERED":
-            if delivered != order_updated_at:
+            if delivered != completion_time:
                 raise RuntimeError(
                     f"DQ 12 FAILED: Delivery timestamp mismatch, order {order_id}"
                 )
@@ -225,8 +226,8 @@ def validate_shipments(records, orders, paid_order_ids):
     print("DQ 01-15: PASS")
 
 
-def generate_shipments(cursor):
-    cursor.execute("""
+def generate_shipments(cursor, only_missing=False):
+    query = """
         SELECT
             o.order_id,
             o.status,
@@ -238,12 +239,26 @@ def generate_shipments(cursor):
             'SHIPPED',
             'DELIVERED'
         )
+    """
+    if only_missing:
+        query += """
+        AND NOT EXISTS (
+            SELECT 1
+            FROM shipments s
+            WHERE s.order_id = o.order_id
+        )
+        """
+    query += """
         ORDER BY o.order_id
-    """)
+    """
+    cursor.execute(query)
 
     orders = cursor.fetchall()
 
     if not orders:
+        if only_missing:
+            print("NO_DATA: No eligible orders require new shipments")
+            return []
         raise RuntimeError("No eligible orders for shipments generation")
 
     print(f"Loaded {len(orders)} eligible orders for shipments")
@@ -289,13 +304,13 @@ def generate_shipments(cursor):
     return records
 
 
-def insert_shipments(cursor, records):
+def insert_shipments(cursor, records, allow_append=False):
     if not records:
         raise RuntimeError("No shipment records to insert")
 
     cursor.execute("SELECT COUNT(*) FROM shipments")
 
-    if cursor.fetchone()[0] != 0:
+    if cursor.fetchone()[0] != 0 and not allow_append:
         raise RuntimeError("Shipments already exist. Refusing duplicate INSERT.")
 
     query = """
@@ -334,12 +349,10 @@ def insert_shipments(cursor, records):
 
     cursor.executemany(query, values)
 
-    cursor.execute("SELECT COUNT(*) FROM shipments")
-    actual_count = cursor.fetchone()[0]
-
-    if actual_count != len(records):
+    if cursor.rowcount != len(records):
         raise RuntimeError(
-            f"INSERT mismatch: expected={len(records)}, " f"actual={actual_count}"
+            f"INSERT mismatch: expected={len(records)}, "
+            f"inserted={cursor.rowcount}"
         )
 
-    print(f"Inserted {actual_count} shipment records")
+    print(f"Inserted {cursor.rowcount} shipment records")

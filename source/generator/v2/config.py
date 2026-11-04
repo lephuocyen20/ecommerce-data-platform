@@ -13,8 +13,8 @@ def load_config():
         raise FileNotFoundError(f"Missing config: {ENV_PATH}")
 
     load_dotenv(ENV_PATH, override=True)
-    if os.getenv("DB_NAME") != "ecommerce_test":
-        raise RuntimeError("Safety check failed: Generator V2 only supports ecommerce_test")
+    if os.getenv("DB_NAME") != "ecommerce_platform":
+        raise RuntimeError("Safety check failed: Generator V2 only supports ecommerce_platform")
 
 
 def get_db_connection():
