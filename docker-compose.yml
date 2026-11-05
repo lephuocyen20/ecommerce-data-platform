@@ -10,7 +10,7 @@ x-airflow-common: &airflow-common
     AIRFLOW_ADMIN_USERNAME: ${AIRFLOW_ADMIN_USERNAME:-admin}
     AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-change_this_local_password}
     AIRFLOW_SIMPLE_AUTH_PASSWORDS_FILE: /opt/airflow/auth/simple_auth_manager_passwords.json
-    INGESTION_WRITE_ENABLED: "true"
+    INGESTION_WRITE_ENABLED: "${INGESTION_WRITE_ENABLED:-false}"
 
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
@@ -26,6 +26,10 @@ x-airflow-common: &airflow-common
     MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
     MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
     BRONZE_BUCKET: ${BRONZE_BUCKET}
+    AIRFLOW_DOCKER_PROJECT_PATH: "${AIRFLOW_DOCKER_PROJECT_PATH:-${PWD}}"
+    AIRFLOW_DOCKER_NETWORK: "${AIRFLOW_DOCKER_NETWORK:-${COMPOSE_PROJECT_NAME:-ecommerce-data-platform}_default}"
+    SPARK_IMAGE: "${SPARK_IMAGE:-ecommerce-spark:3.5.6}"
+    DBT_RUNNER_IMAGE: "${DBT_RUNNER_IMAGE:-ecommerce-data-platform-dbt-runner:latest}"
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
@@ -128,8 +132,8 @@ services:
     <<: *airflow-common
     environment:
       <<: *airflow-common-env
-      WAREHOUSE_WRITE_ENABLED: "true"
-      GOLD_SNAPSHOT_WRITE_ENABLED: ${GOLD_SNAPSHOT_WRITE_ENABLED:-true}
+      WAREHOUSE_WRITE_ENABLED: "${WAREHOUSE_WRITE_ENABLED:-false}"
+      GOLD_SNAPSHOT_WRITE_ENABLED: "${GOLD_SNAPSHOT_WRITE_ENABLED:-false}"
       WAREHOUSE_DB_HOST: postgres
       WAREHOUSE_DB_PORT: ${DB_PORT}
       WAREHOUSE_DB_NAME: ${DB_NAME}

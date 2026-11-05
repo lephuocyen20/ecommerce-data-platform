@@ -17,7 +17,12 @@ from pipeline_tasks.ingestion import ingest_incremental, validate_config, valida
 from pipeline_tasks.silver import (check_silver_eligibility, pipeline_summary, silver_result, skip_silver, verify_silver_manifest)
 from pipeline_tasks.warehouse import check_dbt_eligibility, load_warehouse, skip_dbt, warehouse_gate
 
-PROJECT_PATH = r"C:\Users\HITLAB\Projects\ecommerce-data-platform"
+PROJECT_PATH = os.environ.get("AIRFLOW_DOCKER_PROJECT_PATH")
+if not PROJECT_PATH:
+    raise RuntimeError(
+        "AIRFLOW_DOCKER_PROJECT_PATH must identify the absolute host path "
+        "of this repository for DockerOperator bind mounts"
+    )
 
 
 @dag(

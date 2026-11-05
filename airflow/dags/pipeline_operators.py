@@ -6,8 +6,13 @@ from airflow.providers.docker.operators.docker import DockerOperator
 from docker.types import Mount
 
 
-SPARK_IMAGE = "ecommerce-spark:3.5.6"
-DOCKER_NETWORK = "ecommerce-data-platform_default"
+SPARK_IMAGE = os.environ.get("SPARK_IMAGE", "ecommerce-spark:3.5.6")
+DBT_RUNNER_IMAGE = os.environ.get(
+    "DBT_RUNNER_IMAGE", "ecommerce-data-platform-dbt-runner:latest"
+)
+DOCKER_NETWORK = os.environ.get(
+    "AIRFLOW_DOCKER_NETWORK", "ecommerce-data-platform_default"
+)
 SPARK_WORKDIR = "/opt/spark/work-dir"
 TRANSFORMATION_TARGET = f"{SPARK_WORKDIR}/transformation"
 
@@ -43,7 +48,7 @@ def create_dbt_build_operator(*, project_path):
     """Create the dbt build task used after a successful Warehouse load."""
     return DockerOperator(
         task_id="dbt_build",
-        image="ecommerce-data-platform-dbt-runner:latest",
+        image=DBT_RUNNER_IMAGE,
         network_mode=DOCKER_NETWORK,
         command=["build"],
         private_environment={

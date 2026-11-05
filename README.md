@@ -347,6 +347,24 @@ Bronze `batch_id`, object key, checksum, Silver manifest key and row count.
 
 For additional operational guidance, see [RUNBOOK.md](docs/RUNBOOK.md).
 
+### Test suites
+
+Tests are classified so that they can be run at an appropriate scope:
+
+```powershell
+# Isolated tests; no external services required.
+python -m pytest -m unit
+
+# Spark, PostgreSQL, or MinIO dependent tests.
+python -m pytest -m integration
+
+# Full external-service pipeline scenarios; trigger intentionally.
+python -m pytest -m e2e
+```
+
+The default CI workflow runs the unit and integration suites. E2E scenarios
+require prepared source data and are kept separate from every push.
+
 ## 10. Future Improvements
 
 Potential next steps include:
