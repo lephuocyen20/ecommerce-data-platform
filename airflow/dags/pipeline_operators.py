@@ -44,6 +44,21 @@ def create_incremental_silver_operator(*, table_name, project_path):
     )
 
 
+def create_lakehouse_migration_operator(*, table_name, project_path):
+    """Generic verified-Parquet to Iceberg task; table behavior lives in TableSpec."""
+    manifest_key = "{{ ti.xcom_pull(task_ids='verify_silver_" + table_name + "')['manifest_key'] }}"
+    return create_spark_submit_operator(task_id=f"silver_parquet_to_iceberg_{table_name}", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/run.py", arguments=["--table-name", table_name, "--manifest-key", manifest_key], extra_environment={"LAKEHOUSE_WRITE_ENABLED": os.environ.get("LAKEHOUSE_WRITE_ENABLED", "false")}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+
+
+def create_lakehouse_reconcile_operator(*, table_name, project_path):
+    return create_spark_submit_operator(task_id=f"verify_iceberg_{table_name}", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile.py", arguments=["--table-name", table_name], extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+
+
+def create_lakehouse_warehouse_operator(*, table_name, project_path):
+    batch_id = "{{ ti.xcom_pull(task_ids='validate_" + table_name + "')['batch_id'] }}"
+    return create_spark_submit_operator(task_id=f"iceberg_{table_name}_to_warehouse", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/warehouse/load.py", arguments=["--table-name", table_name, "--batch-id", batch_id], extra_environment={"WAREHOUSE_DB_HOST": "postgres", "WAREHOUSE_DB_PORT": os.environ["DB_PORT"], "WAREHOUSE_DB_NAME": os.environ["DB_NAME"], "WAREHOUSE_DB_USER": os.environ["DB_USER"], "WAREHOUSE_DB_PASSWORD": os.environ["DB_PASSWORD"]}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True), Mount(source=project_path + r"\warehouse", target=f"{SPARK_WORKDIR}/warehouse", type="bind", read_only=True)], retries=0)
+
+
 def create_silver_parquet_to_iceberg_customers_operator(*, project_path):
     """Migrate the verified Silver Parquet customers manifest into Iceberg."""
     manifest_key = "{{ ti.xcom_pull(task_ids='verify_silver_customers')['manifest_key'] }}"
