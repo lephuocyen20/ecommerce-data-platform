@@ -115,10 +115,11 @@ try:
             loaded_count,
         )
     except Exception as exc:
-        # The expected failure is a PostgreSQL CHECK constraint.
-        from psycopg2.errors import CheckViolation
+        # Either constraint proves the checkpoint cannot commit.  The schema
+        # validates the non-null batch boundaries before its watermark CHECK.
+        from psycopg2.errors import CheckViolation, NotNullViolation
 
-        if not isinstance(exc, CheckViolation):
+        if not isinstance(exc, (CheckViolation, NotNullViolation)):
             raise
 
         print("CHECKPOINT CONSTRAINT FAILURE: PASS")
