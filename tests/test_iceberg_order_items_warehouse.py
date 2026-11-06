@@ -2,7 +2,7 @@ import pytest
 import sys
 from pathlib import Path
 
-from lakehouse.warehouse.warehouse_order_items_reader import BUSINESS_COLUMNS, IcebergOrderItemsBatch
+from lakehouse.warehouse.reader import BUSINESS_COLUMNS, IcebergBatch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,33 +12,33 @@ import warehouse_batch_loader
 
 @pytest.mark.unit
 def test_iceberg_order_items_batch_exposes_warehouse_contract():
-    batch = IcebergOrderItemsBatch(
+    batch = IcebergBatch(
         table="lakehouse.silver.order_items",
         catalog_ref="main",
         snapshot_id=456,
         records=[{
             "order_item_id": 1, "order_id": 2, "product_id": 3,
             "quantity": 4, "unit_price": 9.99, "discount_amount": 0,
-        }],
+        }], columns=BUSINESS_COLUMNS["order_items"],
     )
 
-    assert batch.column_names == BUSINESS_COLUMNS
+    assert batch.column_names == BUSINESS_COLUMNS["order_items"]
     assert batch.lineage == {
         "source_type": "iceberg", "iceberg_table": "lakehouse.silver.order_items",
         "iceberg_catalog_ref": "main", "iceberg_snapshot_id": 456,
     }
-    assert batch.select(tuple(reversed(BUSINESS_COLUMNS))).records[0]["order_item_id"] == 1
+    assert batch.select(tuple(reversed(BUSINESS_COLUMNS["order_items"]))).records[0]["order_item_id"] == 1
 
 
 @pytest.mark.unit
 def test_iceberg_order_items_batch_requires_immutable_snapshot():
     with pytest.raises(TypeError):
-        IcebergOrderItemsBatch(table="x", catalog_ref="main", records=[])
+        IcebergBatch(table="x", catalog_ref="main", records=[], columns=())
 
 
 @pytest.mark.unit
 def test_iceberg_order_items_batch_rejects_partial_selection():
-    batch = IcebergOrderItemsBatch("x", "main", 1, [])
+    batch = IcebergBatch("x", "main", 1, [], BUSINESS_COLUMNS["order_items"])
     with pytest.raises(ValueError, match="preserve"):
         batch.select(("order_item_id",))
 
@@ -46,9 +46,9 @@ def test_iceberg_order_items_batch_rejects_partial_selection():
 @pytest.mark.unit
 def test_order_items_loader_records_immutable_iceberg_lineage(monkeypatch):
     calls = {}
-    source = IcebergOrderItemsBatch(
+    source = IcebergBatch(
         "lakehouse.silver.order_items", "main", 456,
-        [{"order_item_id": 1, "order_id": 2, "product_id": 3, "quantity": 4, "unit_price": 9.99, "discount_amount": 0}],
+        [{"order_item_id": 1, "order_id": 2, "product_id": 3, "quantity": 4, "unit_price": 9.99, "discount_amount": 0}], BUSINESS_COLUMNS["order_items"],
     )
     batch = {"table_name": "order_items", "batch_id": "a" * 32}
 
@@ -70,6 +70,6 @@ def test_order_items_loader_records_immutable_iceberg_lineage(monkeypatch):
 
 @pytest.mark.unit
 def test_order_items_loader_requires_transaction():
-    source = IcebergOrderItemsBatch("lakehouse.silver.order_items", "main", 1, [])
+    source = IcebergBatch("lakehouse.silver.order_items", "main", 1, [], BUSINESS_COLUMNS["order_items"])
     with pytest.raises(ValueError, match="Autocommit"):
         warehouse_batch_loader.load_iceberg_order_items_batch(type("Conn", (), {"autocommit": True})(), {"table_name": "order_items", "batch_id": "a" * 32}, source)

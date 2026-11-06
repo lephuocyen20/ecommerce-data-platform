@@ -130,8 +130,8 @@ def create_iceberg_customers_warehouse_operator(*, project_path):
     return create_spark_submit_operator(
         task_id="iceberg_customers_to_warehouse",
         project_path=project_path,
-        script_path=f"{SPARK_WORKDIR}/lakehouse/warehouse/load_customers_to_warehouse.py",
-        arguments=["--batch-id", batch_id],
+        script_path=f"{SPARK_WORKDIR}/lakehouse/warehouse/load.py",
+        arguments=["--table-name", "customers", "--batch-id", batch_id],
         extra_environment={"WAREHOUSE_DB_HOST": "postgres", "WAREHOUSE_DB_PORT": os.environ["DB_PORT"], "WAREHOUSE_DB_NAME": os.environ["DB_NAME"], "WAREHOUSE_DB_USER": os.environ["DB_USER"], "WAREHOUSE_DB_PASSWORD": os.environ["DB_PASSWORD"]},
         extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True), Mount(source=project_path + r"\warehouse", target=f"{SPARK_WORKDIR}/warehouse", type="bind", read_only=True)],
         retries=0,
@@ -142,28 +142,28 @@ def create_iceberg_products_warehouse_operator(*, project_path):
     batch_id = "{{ ti.xcom_pull(task_ids='validate_products')['batch_id'] }}"
     return create_spark_submit_operator(
         task_id="iceberg_products_to_warehouse", project_path=project_path,
-        script_path=f"{SPARK_WORKDIR}/lakehouse/warehouse/load_products_to_warehouse.py", arguments=["--batch-id", batch_id],
+        script_path=f"{SPARK_WORKDIR}/lakehouse/warehouse/load.py", arguments=["--table-name", "products", "--batch-id", batch_id],
         extra_environment={"WAREHOUSE_DB_HOST": "postgres", "WAREHOUSE_DB_PORT": os.environ["DB_PORT"], "WAREHOUSE_DB_NAME": os.environ["DB_NAME"], "WAREHOUSE_DB_USER": os.environ["DB_USER"], "WAREHOUSE_DB_PASSWORD": os.environ["DB_PASSWORD"]},
         extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True), Mount(source=project_path + r"\warehouse", target=f"{SPARK_WORKDIR}/warehouse", type="bind", read_only=True)], retries=0,
     )
 
 def create_iceberg_orders_warehouse_operator(*, project_path):
     batch_id = "{{ ti.xcom_pull(task_ids='validate_orders')['batch_id'] }}"
-    return create_spark_submit_operator(task_id="iceberg_orders_to_warehouse", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/warehouse/load_orders_to_warehouse.py", arguments=["--batch-id", batch_id], extra_environment={"WAREHOUSE_DB_HOST": "postgres", "WAREHOUSE_DB_PORT": os.environ["DB_PORT"], "WAREHOUSE_DB_NAME": os.environ["DB_NAME"], "WAREHOUSE_DB_USER": os.environ["DB_USER"], "WAREHOUSE_DB_PASSWORD": os.environ["DB_PASSWORD"]}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True), Mount(source=project_path + r"\warehouse", target=f"{SPARK_WORKDIR}/warehouse", type="bind", read_only=True)], retries=0)
+    return create_spark_submit_operator(task_id="iceberg_orders_to_warehouse", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/warehouse/load.py", arguments=["--table-name", "orders", "--batch-id", batch_id], extra_environment={"WAREHOUSE_DB_HOST": "postgres", "WAREHOUSE_DB_PORT": os.environ["DB_PORT"], "WAREHOUSE_DB_NAME": os.environ["DB_NAME"], "WAREHOUSE_DB_USER": os.environ["DB_USER"], "WAREHOUSE_DB_PASSWORD": os.environ["DB_PASSWORD"]}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True), Mount(source=project_path + r"\warehouse", target=f"{SPARK_WORKDIR}/warehouse", type="bind", read_only=True)], retries=0)
 
 
 def create_iceberg_order_items_warehouse_operator(*, project_path):
     batch_id = "{{ ti.xcom_pull(task_ids='validate_order_items')['batch_id'] }}"
-    return create_spark_submit_operator(task_id="iceberg_order_items_to_warehouse", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/warehouse/load_order_items_to_warehouse.py", arguments=["--batch-id", batch_id], extra_environment={"WAREHOUSE_DB_HOST": "postgres", "WAREHOUSE_DB_PORT": os.environ["DB_PORT"], "WAREHOUSE_DB_NAME": os.environ["DB_NAME"], "WAREHOUSE_DB_USER": os.environ["DB_USER"], "WAREHOUSE_DB_PASSWORD": os.environ["DB_PASSWORD"]}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True), Mount(source=project_path + r"\warehouse", target=f"{SPARK_WORKDIR}/warehouse", type="bind", read_only=True)], retries=0)
+    return create_spark_submit_operator(task_id="iceberg_order_items_to_warehouse", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/warehouse/load.py", arguments=["--table-name", "order_items", "--batch-id", batch_id], extra_environment={"WAREHOUSE_DB_HOST": "postgres", "WAREHOUSE_DB_PORT": os.environ["DB_PORT"], "WAREHOUSE_DB_NAME": os.environ["DB_NAME"], "WAREHOUSE_DB_USER": os.environ["DB_USER"], "WAREHOUSE_DB_PASSWORD": os.environ["DB_PASSWORD"]}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True), Mount(source=project_path + r"\warehouse", target=f"{SPARK_WORKDIR}/warehouse", type="bind", read_only=True)], retries=0)
 
 
 def create_iceberg_payments_warehouse_operator(*, project_path):
     batch_id = "{{ ti.xcom_pull(task_ids='validate_payments')['batch_id'] }}"
-    return create_spark_submit_operator(task_id="iceberg_payments_to_warehouse", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/warehouse/load_payments_to_warehouse.py", arguments=["--batch-id", batch_id], extra_environment={"WAREHOUSE_DB_HOST": "postgres", "WAREHOUSE_DB_PORT": os.environ["DB_PORT"], "WAREHOUSE_DB_NAME": os.environ["DB_NAME"], "WAREHOUSE_DB_USER": os.environ["DB_USER"], "WAREHOUSE_DB_PASSWORD": os.environ["DB_PASSWORD"]}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True), Mount(source=project_path + r"\warehouse", target=f"{SPARK_WORKDIR}/warehouse", type="bind", read_only=True)], retries=0)
+    return create_spark_submit_operator(task_id="iceberg_payments_to_warehouse", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/warehouse/load.py", arguments=["--table-name", "payments", "--batch-id", batch_id], extra_environment={"WAREHOUSE_DB_HOST": "postgres", "WAREHOUSE_DB_PORT": os.environ["DB_PORT"], "WAREHOUSE_DB_NAME": os.environ["DB_NAME"], "WAREHOUSE_DB_USER": os.environ["DB_USER"], "WAREHOUSE_DB_PASSWORD": os.environ["DB_PASSWORD"]}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True), Mount(source=project_path + r"\warehouse", target=f"{SPARK_WORKDIR}/warehouse", type="bind", read_only=True)], retries=0)
 
 def create_iceberg_shipments_warehouse_operator(*, project_path):
     batch_id = "{{ ti.xcom_pull(task_ids='validate_shipments')['batch_id'] }}"
-    return create_spark_submit_operator(task_id="iceberg_shipments_to_warehouse", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/warehouse/load_shipments_to_warehouse.py", arguments=["--batch-id", batch_id], extra_environment={"WAREHOUSE_DB_HOST": "postgres", "WAREHOUSE_DB_PORT": os.environ["DB_PORT"], "WAREHOUSE_DB_NAME": os.environ["DB_NAME"], "WAREHOUSE_DB_USER": os.environ["DB_USER"], "WAREHOUSE_DB_PASSWORD": os.environ["DB_PASSWORD"]}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True), Mount(source=project_path + r"\warehouse", target=f"{SPARK_WORKDIR}/warehouse", type="bind", read_only=True)], retries=0)
+    return create_spark_submit_operator(task_id="iceberg_shipments_to_warehouse", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/warehouse/load.py", arguments=["--table-name", "shipments", "--batch-id", batch_id], extra_environment={"WAREHOUSE_DB_HOST": "postgres", "WAREHOUSE_DB_PORT": os.environ["DB_PORT"], "WAREHOUSE_DB_NAME": os.environ["DB_NAME"], "WAREHOUSE_DB_USER": os.environ["DB_USER"], "WAREHOUSE_DB_PASSWORD": os.environ["DB_PASSWORD"]}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True), Mount(source=project_path + r"\warehouse", target=f"{SPARK_WORKDIR}/warehouse", type="bind", read_only=True)], retries=0)
 
 
 def create_dbt_build_operator(*, project_path):
