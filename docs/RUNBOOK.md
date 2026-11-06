@@ -157,6 +157,22 @@ Loader upsert vào Raw Warehouse và ghi checkpoint vào `warehouse.loaded_batch
 cùng transaction; lỗi sẽ rollback. dbt chỉ chạy sau khi loader trả `COMPLETED` và
 checkpoint được kiểm tra lại.
 
+### Iceberg order_items cutover
+
+Keep `ORDER_ITEMS_SILVER_SOURCE=parquet` during the dual run. Before enabling
+Iceberg, run the read-only reconciliation command in `LAKEHOUSE.md` and require
+matching rows, business hashes, quantity, gross amount, discount, net amount,
+and order/product foreign keys. For one reviewed WRITE run only, set:
+
+```text
+ORDER_ITEMS_SILVER_SOURCE=iceberg
+ORDER_ITEMS_ICEBERG_CUTOVER_ENABLED=true
+```
+
+Recreate the Airflow services after changing the environment. The DAG records
+the pinned Iceberg snapshot in `warehouse.loaded_batches`; return the source to
+`parquet` to roll back without deleting either copy.
+
 ### Gold snapshot WRITE
 
 Gold chỉ publish snapshot khi `GOLD_SNAPSHOT_WRITE_ENABLED=true`. Với database đã được tạo

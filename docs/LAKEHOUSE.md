@@ -106,6 +106,31 @@ After reconciliation passes, enable `PRODUCTS_SILVER_SOURCE=iceberg` plus
 `PRODUCTS_SILVER_SOURCE=parquet` and disable the cutover flag to roll back.
 Parquet remains the migration and rollback source during this window.
 
+## Order-items migration and cutover
+
+Order items use the same manifest-protected migration path and are reconciled
+against the complete Silver Parquet history before they can be used by the
+Warehouse:
+
+```powershell
+# Historical backfill (explicit write permission)
+docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/run_order_items.py --backfill
+
+# One verified incremental manifest
+docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/run_order_items.py --manifest-key silver_incremental/order_items/batch_id=<batch-id>/_BATCH_METADATA.json
+
+# Read-only reconciliation: rows, business-column hashes, and Order/Product FKs
+docker exec ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/reconcile_order_items.py
+```
+
+The Airflow dual-run performs migration and reconciliation while the Warehouse
+continues loading Parquet. To cut over a reviewed run, set both
+`ORDER_ITEMS_SILVER_SOURCE=iceberg` and
+`ORDER_ITEMS_ICEBERG_CUTOVER_ENABLED=true`. The DAG then loads the pinned
+Iceberg snapshot and records its immutable snapshot lineage in
+`warehouse.loaded_batches`. Revert the source to `parquet` to roll back; this
+does not delete either source.
+
 ## Regression coverage
 
 `test_iceberg_customers_manifest_migration` creates a fresh Silver Parquet
