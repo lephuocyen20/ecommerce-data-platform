@@ -167,3 +167,83 @@ def verify_iceberg_order_items_checkpoint(validation_result):
     if not row or row[0] != "iceberg" or not row[1] or not row[2] or not isinstance(row[3], int):
         raise RuntimeError(f"Iceberg order_items Warehouse checkpoint missing or invalid: {batch_id}")
     return {"table_name": "order_items", "batch_id": batch_id, "source_type": row[0], "iceberg_table": row[1], "iceberg_catalog_ref": row[2], "iceberg_snapshot_id": row[3]}
+
+
+@task.branch(retries=0)
+def check_lakehouse_payments_eligibility(validation_result):
+    if not isinstance(validation_result, dict) or validation_result.get("table_name") != "payments":
+        raise ValueError("Missing payments Bronze validation")
+    if validation_result.get("mode") != "WRITE" or validation_result.get("status") == "SKIPPED" or os.getenv("LAKEHOUSE_WRITE_ENABLED", "false").lower() != "true":
+        return "skip_iceberg_payments"
+    if validation_result.get("status") != "PASS" or validation_result.get("checksum_verified") is not True:
+        raise ValueError("payments Bronze validation did not pass")
+    return "silver_parquet_to_iceberg_payments"
+
+
+@task(retries=0)
+def skip_iceberg_payments(validation_result):
+    return {"table_name": "payments", "status": "SKIPPED", "reason": "LAKEHOUSE_DISABLED_OR_NO_DATA"}
+
+
+@task.branch(retries=0)
+def check_iceberg_payments_cutover():
+    if silver_source("payments") != ICEBERG:
+        return "skip_iceberg_payments_warehouse"
+    require_iceberg_table_cutover("payments")
+    return "iceberg_payments_to_warehouse"
+
+
+@task(task_id="skip_iceberg_payments_warehouse", retries=0)
+def skip_iceberg_payments_warehouse():
+    return {"table_name": "payments", "status": "SKIPPED", "reason": "PARQUET_REMAINS_ACTIVE"}
+
+
+@task(retries=0)
+def verify_iceberg_payments_checkpoint(validation_result):
+    if not isinstance(validation_result, dict) or validation_result.get("table_name") != "payments":
+        raise ValueError("Missing payments validation result")
+    batch_id = validation_result.get("batch_id")
+    if not isinstance(batch_id, str) or len(batch_id) != 32:
+        raise ValueError("Iceberg payments checkpoint verification requires a batch ID")
+    import psycopg2
+    conn = psycopg2.connect(host=os.environ["WAREHOUSE_DB_HOST"], port=os.environ["WAREHOUSE_DB_PORT"], dbname=os.environ["WAREHOUSE_DB_NAME"], user=os.environ["WAREHOUSE_DB_USER"], password=os.environ["WAREHOUSE_DB_PASSWORD"])
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT source_type, iceberg_table, iceberg_catalog_ref, iceberg_snapshot_id FROM warehouse.loaded_batches WHERE batch_id = %s", (batch_id,)); row = cursor.fetchone()
+    finally:
+        conn.close()
+    if not row or row[0] != "iceberg" or not row[1] or not row[2] or not isinstance(row[3], int):
+        raise RuntimeError(f"Iceberg payments Warehouse checkpoint missing or invalid: {batch_id}")
+    return {"table_name": "payments", "batch_id": batch_id, "source_type": row[0], "iceberg_table": row[1], "iceberg_catalog_ref": row[2], "iceberg_snapshot_id": row[3]}
+
+
+@task.branch(retries=0)
+def check_lakehouse_shipments_eligibility(validation_result):
+    if not isinstance(validation_result, dict) or validation_result.get("table_name") != "shipments": raise ValueError("Missing shipments Bronze validation")
+    if validation_result.get("mode") != "WRITE" or validation_result.get("status") == "SKIPPED" or os.getenv("LAKEHOUSE_WRITE_ENABLED", "false").lower() != "true": return "skip_iceberg_shipments"
+    if validation_result.get("status") != "PASS" or validation_result.get("checksum_verified") is not True: raise ValueError("shipments Bronze validation did not pass")
+    return "silver_parquet_to_iceberg_shipments"
+
+@task(retries=0)
+def skip_iceberg_shipments(validation_result): return {"table_name": "shipments", "status": "SKIPPED", "reason": "LAKEHOUSE_DISABLED_OR_NO_DATA"}
+
+@task.branch(retries=0)
+def check_iceberg_shipments_cutover():
+    if silver_source("shipments") != ICEBERG: return "skip_iceberg_shipments_warehouse"
+    require_iceberg_table_cutover("shipments"); return "iceberg_shipments_to_warehouse"
+
+@task(task_id="skip_iceberg_shipments_warehouse", retries=0)
+def skip_iceberg_shipments_warehouse(): return {"table_name": "shipments", "status": "SKIPPED", "reason": "PARQUET_REMAINS_ACTIVE"}
+
+@task(retries=0)
+def verify_iceberg_shipments_checkpoint(validation_result):
+    if not isinstance(validation_result, dict) or validation_result.get("table_name") != "shipments": raise ValueError("Missing shipments validation result")
+    batch_id = validation_result.get("batch_id")
+    if not isinstance(batch_id, str) or len(batch_id) != 32: raise ValueError("Iceberg shipments checkpoint verification requires a batch ID")
+    import psycopg2
+    conn = psycopg2.connect(host=os.environ["WAREHOUSE_DB_HOST"], port=os.environ["WAREHOUSE_DB_PORT"], dbname=os.environ["WAREHOUSE_DB_NAME"], user=os.environ["WAREHOUSE_DB_USER"], password=os.environ["WAREHOUSE_DB_PASSWORD"])
+    try:
+        with conn.cursor() as cursor: cursor.execute("SELECT source_type, iceberg_table, iceberg_catalog_ref, iceberg_snapshot_id FROM warehouse.loaded_batches WHERE batch_id = %s", (batch_id,)); row = cursor.fetchone()
+    finally: conn.close()
+    if not row or row[0] != "iceberg" or not row[1] or not row[2] or not isinstance(row[3], int): raise RuntimeError(f"Iceberg shipments Warehouse checkpoint missing or invalid: {batch_id}")
+    return {"table_name": "shipments", "batch_id": batch_id, "source_type": row[0], "iceberg_table": row[1], "iceberg_catalog_ref": row[2], "iceberg_snapshot_id": row[3]}

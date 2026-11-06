@@ -11,8 +11,8 @@ if AIRFLOW_PROJECT_PATH not in sys.path:
     sys.path.insert(0, AIRFLOW_PROJECT_PATH)
 
 from pipeline_contracts import GOLD_DATASET_SOURCES, TABLES
-from pipeline_operators import (create_dbt_build_operator, create_gold_write_operator, create_incremental_silver_operator, create_silver_snapshot_operator, create_silver_parquet_to_iceberg_customers_operator, create_reconcile_iceberg_customers_operator, create_iceberg_customers_warehouse_operator, create_silver_parquet_to_iceberg_products_operator, create_reconcile_iceberg_products_operator, create_iceberg_products_warehouse_operator, create_silver_parquet_to_iceberg_orders_operator, create_reconcile_iceberg_orders_operator, create_iceberg_orders_warehouse_operator, create_silver_parquet_to_iceberg_order_items_operator, create_reconcile_iceberg_order_items_operator, create_iceberg_order_items_warehouse_operator)
-from pipeline_tasks.lakehouse import (check_lakehouse_customers_eligibility, skip_iceberg_customers, verify_iceberg_customers_checkpoint, check_lakehouse_products_eligibility, skip_iceberg_products, verify_iceberg_products_checkpoint, check_lakehouse_orders_eligibility, skip_iceberg_orders, verify_iceberg_orders_checkpoint, check_lakehouse_order_items_eligibility, skip_iceberg_order_items, check_iceberg_order_items_cutover, skip_iceberg_order_items_warehouse, verify_iceberg_order_items_checkpoint)
+from pipeline_operators import (create_dbt_build_operator, create_gold_write_operator, create_incremental_silver_operator, create_silver_snapshot_operator, create_silver_parquet_to_iceberg_customers_operator, create_reconcile_iceberg_customers_operator, create_iceberg_customers_warehouse_operator, create_silver_parquet_to_iceberg_products_operator, create_reconcile_iceberg_products_operator, create_iceberg_products_warehouse_operator, create_silver_parquet_to_iceberg_orders_operator, create_reconcile_iceberg_orders_operator, create_iceberg_orders_warehouse_operator, create_silver_parquet_to_iceberg_order_items_operator, create_reconcile_iceberg_order_items_operator, create_iceberg_order_items_warehouse_operator, create_silver_parquet_to_iceberg_payments_operator, create_reconcile_iceberg_payments_operator, create_iceberg_payments_warehouse_operator, create_silver_parquet_to_iceberg_shipments_operator, create_reconcile_iceberg_shipments_operator, create_iceberg_shipments_warehouse_operator)
+from pipeline_tasks.lakehouse import (check_lakehouse_customers_eligibility, skip_iceberg_customers, verify_iceberg_customers_checkpoint, check_lakehouse_products_eligibility, skip_iceberg_products, verify_iceberg_products_checkpoint, check_lakehouse_orders_eligibility, skip_iceberg_orders, verify_iceberg_orders_checkpoint, check_lakehouse_order_items_eligibility, skip_iceberg_order_items, check_iceberg_order_items_cutover, skip_iceberg_order_items_warehouse, verify_iceberg_order_items_checkpoint, check_lakehouse_payments_eligibility, skip_iceberg_payments, check_iceberg_payments_cutover, skip_iceberg_payments_warehouse, verify_iceberg_payments_checkpoint, check_lakehouse_shipments_eligibility, skip_iceberg_shipments, check_iceberg_shipments_cutover, skip_iceberg_shipments_warehouse, verify_iceberg_shipments_checkpoint)
 from pipeline_tasks.gold import (gold_snapshot_gate, prepare_gold_dataset_sources_task, resolve_gold_snapshot_lineage_task, skip_gold_layer)
 from pipeline_tasks.ingestion import ingest_incremental, validate_config, validate_incremental
 from pipeline_tasks.silver import (check_silver_eligibility, pipeline_summary, silver_result, skip_silver, verify_silver_manifest)
@@ -137,10 +137,38 @@ def ecommerce_incremental_ingestion():
     iceberg_order_items_cutover >> [iceberg_order_items_warehouse_loader, iceberg_order_items_warehouse_skip]
     iceberg_order_items_warehouse_loader >> iceberg_order_items_checkpoint
 
+    payments_lakehouse_gate = check_lakehouse_payments_eligibility(validation_results["payments"])
+    iceberg_payments = create_silver_parquet_to_iceberg_payments_operator(project_path=PROJECT_PATH)
+    iceberg_payments_skip = skip_iceberg_payments(validation_results["payments"])
+    iceberg_payments_reconcile = create_reconcile_iceberg_payments_operator(project_path=PROJECT_PATH)
+    iceberg_payments_cutover = check_iceberg_payments_cutover()
+    iceberg_payments_warehouse_skip = skip_iceberg_payments_warehouse()
+    iceberg_payments_warehouse_loader = create_iceberg_payments_warehouse_operator(project_path=PROJECT_PATH)
+    iceberg_payments_checkpoint = verify_iceberg_payments_checkpoint(validation_results["payments"])
+    silver_verify_tasks["payments"] >> payments_lakehouse_gate
+    payments_lakehouse_gate >> [iceberg_payments, iceberg_payments_skip]
+    iceberg_payments >> iceberg_payments_reconcile >> iceberg_payments_cutover
+    iceberg_payments_cutover >> [iceberg_payments_warehouse_loader, iceberg_payments_warehouse_skip]
+    iceberg_payments_warehouse_loader >> iceberg_payments_checkpoint
+
+    shipments_lakehouse_gate = check_lakehouse_shipments_eligibility(validation_results["shipments"])
+    iceberg_shipments = create_silver_parquet_to_iceberg_shipments_operator(project_path=PROJECT_PATH)
+    iceberg_shipments_skip = skip_iceberg_shipments(validation_results["shipments"])
+    iceberg_shipments_reconcile = create_reconcile_iceberg_shipments_operator(project_path=PROJECT_PATH)
+    iceberg_shipments_cutover = check_iceberg_shipments_cutover()
+    iceberg_shipments_warehouse_skip = skip_iceberg_shipments_warehouse()
+    iceberg_shipments_warehouse_loader = create_iceberg_shipments_warehouse_operator(project_path=PROJECT_PATH)
+    iceberg_shipments_checkpoint = verify_iceberg_shipments_checkpoint(validation_results["shipments"])
+    silver_verify_tasks["shipments"] >> shipments_lakehouse_gate
+    shipments_lakehouse_gate >> [iceberg_shipments, iceberg_shipments_skip]
+    iceberg_shipments >> iceberg_shipments_reconcile >> iceberg_shipments_cutover
+    iceberg_shipments_cutover >> [iceberg_shipments_warehouse_loader, iceberg_shipments_warehouse_skip]
+    iceberg_shipments_warehouse_loader >> iceberg_shipments_checkpoint
+
     pipeline_summary_task = pipeline_summary()
     for table_name in TABLES:
         silver_result_tasks[table_name] >> pipeline_summary_task
-    warehouse_gate_task = warehouse_gate(pipeline_summary_task, {"customers": iceberg_checkpoint, "products": iceberg_products_checkpoint, "orders": iceberg_orders_checkpoint, "order_items": iceberg_order_items_checkpoint})
+    warehouse_gate_task = warehouse_gate(pipeline_summary_task, {"customers": iceberg_checkpoint, "products": iceberg_products_checkpoint, "orders": iceberg_orders_checkpoint, "order_items": iceberg_order_items_checkpoint, "payments": iceberg_payments_checkpoint, "shipments": iceberg_shipments_checkpoint})
     warehouse_loader_task = load_warehouse(warehouse_gate_task)
     dbt_eligibility_task = check_dbt_eligibility(warehouse_loader_task)
     dbt_eligibility_task >> [dbt_build_task, skip_dbt()]

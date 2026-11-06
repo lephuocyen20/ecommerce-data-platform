@@ -80,6 +80,15 @@ def create_silver_parquet_to_iceberg_order_items_operator(*, project_path):
     return create_spark_submit_operator(task_id="silver_parquet_to_iceberg_order_items", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/run_order_items.py", arguments=["--manifest-key", key], extra_environment={"LAKEHOUSE_WRITE_ENABLED": os.environ.get("LAKEHOUSE_WRITE_ENABLED", "false")}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
 
 
+def create_silver_parquet_to_iceberg_payments_operator(*, project_path):
+    key = "{{ ti.xcom_pull(task_ids='verify_silver_payments')['manifest_key'] }}"
+    return create_spark_submit_operator(task_id="silver_parquet_to_iceberg_payments", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/run_payments.py", arguments=["--manifest-key", key], extra_environment={"LAKEHOUSE_WRITE_ENABLED": os.environ.get("LAKEHOUSE_WRITE_ENABLED", "false")}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+
+def create_silver_parquet_to_iceberg_shipments_operator(*, project_path):
+    key = "{{ ti.xcom_pull(task_ids='verify_silver_shipments')['manifest_key'] }}"
+    return create_spark_submit_operator(task_id="silver_parquet_to_iceberg_shipments", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/run_shipments.py", arguments=["--manifest-key", key], extra_environment={"LAKEHOUSE_WRITE_ENABLED": os.environ.get("LAKEHOUSE_WRITE_ENABLED", "false")}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+
+
 def create_reconcile_iceberg_customers_operator(*, project_path):
     manifest_key = "{{ ti.xcom_pull(task_ids='verify_silver_customers')['manifest_key'] }}"
     return create_spark_submit_operator(
@@ -107,6 +116,13 @@ def create_reconcile_iceberg_orders_operator(*, project_path):
 
 def create_reconcile_iceberg_order_items_operator(*, project_path):
     return create_spark_submit_operator(task_id="verify_iceberg_order_items", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/reconcile_order_items.py", extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+
+
+def create_reconcile_iceberg_payments_operator(*, project_path):
+    return create_spark_submit_operator(task_id="verify_iceberg_payments", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/reconcile_payments.py", extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+
+def create_reconcile_iceberg_shipments_operator(*, project_path):
+    return create_spark_submit_operator(task_id="verify_iceberg_shipments", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/reconcile_shipments.py", extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
 
 
 def create_iceberg_customers_warehouse_operator(*, project_path):
@@ -139,6 +155,15 @@ def create_iceberg_orders_warehouse_operator(*, project_path):
 def create_iceberg_order_items_warehouse_operator(*, project_path):
     batch_id = "{{ ti.xcom_pull(task_ids='validate_order_items')['batch_id'] }}"
     return create_spark_submit_operator(task_id="iceberg_order_items_to_warehouse", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/load_order_items_to_warehouse.py", arguments=["--batch-id", batch_id], extra_environment={"WAREHOUSE_DB_HOST": "postgres", "WAREHOUSE_DB_PORT": os.environ["DB_PORT"], "WAREHOUSE_DB_NAME": os.environ["DB_NAME"], "WAREHOUSE_DB_USER": os.environ["DB_USER"], "WAREHOUSE_DB_PASSWORD": os.environ["DB_PASSWORD"]}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True), Mount(source=project_path + r"\warehouse", target=f"{SPARK_WORKDIR}/warehouse", type="bind", read_only=True)], retries=0)
+
+
+def create_iceberg_payments_warehouse_operator(*, project_path):
+    batch_id = "{{ ti.xcom_pull(task_ids='validate_payments')['batch_id'] }}"
+    return create_spark_submit_operator(task_id="iceberg_payments_to_warehouse", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/load_payments_to_warehouse.py", arguments=["--batch-id", batch_id], extra_environment={"WAREHOUSE_DB_HOST": "postgres", "WAREHOUSE_DB_PORT": os.environ["DB_PORT"], "WAREHOUSE_DB_NAME": os.environ["DB_NAME"], "WAREHOUSE_DB_USER": os.environ["DB_USER"], "WAREHOUSE_DB_PASSWORD": os.environ["DB_PASSWORD"]}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True), Mount(source=project_path + r"\warehouse", target=f"{SPARK_WORKDIR}/warehouse", type="bind", read_only=True)], retries=0)
+
+def create_iceberg_shipments_warehouse_operator(*, project_path):
+    batch_id = "{{ ti.xcom_pull(task_ids='validate_shipments')['batch_id'] }}"
+    return create_spark_submit_operator(task_id="iceberg_shipments_to_warehouse", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/load_shipments_to_warehouse.py", arguments=["--batch-id", batch_id], extra_environment={"WAREHOUSE_DB_HOST": "postgres", "WAREHOUSE_DB_PORT": os.environ["DB_PORT"], "WAREHOUSE_DB_NAME": os.environ["DB_NAME"], "WAREHOUSE_DB_USER": os.environ["DB_USER"], "WAREHOUSE_DB_PASSWORD": os.environ["DB_PASSWORD"]}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True), Mount(source=project_path + r"\warehouse", target=f"{SPARK_WORKDIR}/warehouse", type="bind", read_only=True)], retries=0)
 
 
 def create_dbt_build_operator(*, project_path):
