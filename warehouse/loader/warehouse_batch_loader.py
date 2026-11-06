@@ -112,3 +112,25 @@ def load_iceberg_customers_batch(conn, batch, iceberg_batch):
     }
     insert_loaded_batch(conn, batch, manifest_key, manifest, loaded_row_count, source_lineage=lineage)
     return {"table_name": "customers", "batch_id": batch["batch_id"], "status": "LOADED", "loaded_row_count": loaded_row_count, "source_type": "iceberg", "iceberg_snapshot_id": snapshot_id}
+
+
+def load_iceberg_products_batch(conn, batch, iceberg_batch):
+    """Load a pinned Iceberg products snapshot with the existing safeguards."""
+    if conn.autocommit:
+        raise ValueError("Autocommit must be disabled")
+    if batch.get("table_name") != "products":
+        raise ValueError("Iceberg products loader requires a products batch")
+    lineage = iceberg_batch.lineage
+    prepared_table = prepare_raw_table("products", iceberg_batch)
+    acquire_table_lock(conn, "products")
+    decision = check_batch_loadable(conn, batch)
+    if decision == "SKIP":
+        return {"table_name": "products", "batch_id": batch["batch_id"], "status": "SKIPPED", "loaded_row_count": 0}
+    if decision != "READY":
+        raise ValueError(f"Unexpected guard decision: {decision}")
+    loaded = upsert_raw_batch(conn, "products", batch["batch_id"], prepared_table)
+    snapshot = lineage["iceberg_snapshot_id"]
+    key = f"iceberg/{lineage['iceberg_table']}/ref={lineage['iceberg_catalog_ref']}/snapshot_id={snapshot}"
+    manifest = {"status": "COMPLETED", "table_name": "products", "batch_id": batch["batch_id"], "data_prefix": key, "silver_row_count": len(iceberg_batch.records)}
+    insert_loaded_batch(conn, batch, key, manifest, loaded, source_lineage=lineage)
+    return {"table_name": "products", "batch_id": batch["batch_id"], "status": "LOADED", "loaded_row_count": loaded, "source_type": "iceberg", "iceberg_snapshot_id": snapshot}

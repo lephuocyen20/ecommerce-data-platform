@@ -37,13 +37,19 @@ table, writes two rows, reads them back through Nessie, and prints
 The pytest E2E test invokes this same bounded Spark submission, so it validates
 the actual image, Nessie catalog, and MinIO object store instead of mocks.
 
-## Customers cutover controls
+## Cutover controls
 
 Warehouse loading remains on legacy Parquet by default. Set
 `CUSTOMERS_SILVER_SOURCE=iceberg` only after successful dual-run reconciliation,
 and also set `CUSTOMERS_ICEBERG_CUTOVER_ENABLED=true` for the reviewed cutover
 run. Set `CUSTOMERS_SILVER_SOURCE=parquet` to roll back immediately; no table
 data is deleted by this switch.
+
+Products use the identical opt-in controls:
+`PRODUCTS_SILVER_SOURCE=iceberg` and
+`PRODUCTS_ICEBERG_CUTOVER_ENABLED=true`.  Both sources default to `parquet`.
+The Airflow Warehouse gate removes a cut-over table from the legacy loader, so
+one verified batch can never be loaded from both Parquet and Iceberg.
 
 ## Customers migration and cutover
 
@@ -75,3 +81,35 @@ Warehouse remains on Parquet by default. After a reviewed reconciliation PASS,
 set `CUSTOMERS_SILVER_SOURCE=iceberg` and
 `CUSTOMERS_ICEBERG_CUTOVER_ENABLED=true`. Roll back by setting source back to
 `parquet`; neither Parquet nor Iceberg data is deleted.
+
+## Products migration and cutover
+
+Products follow the same verified migration contract:
+
+```text
+Silver Parquet manifest -> Iceberg products -> cumulative reconciliation
+```
+
+```powershell
+# Historical backfill (explicit write permission)
+docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/run_products.py --backfill
+
+# One incremental manifest
+docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/run_products.py --manifest-key silver_incremental/products/batch_id=<batch-id>/_BATCH_METADATA.json
+
+# Read-only cumulative reconciliation
+docker exec ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/reconcile_products.py
+```
+
+After reconciliation passes, enable `PRODUCTS_SILVER_SOURCE=iceberg` plus
+`PRODUCTS_ICEBERG_CUTOVER_ENABLED=true` for a reviewed run. Restore
+`PRODUCTS_SILVER_SOURCE=parquet` and disable the cutover flag to roll back.
+Parquet remains the migration and rollback source during this window.
+
+## Regression coverage
+
+`test_iceberg_customers_manifest_migration` creates a fresh Silver Parquet
+batch and manifest in MinIO, verifies object inventory/ETag integrity,
+migrates it into a disposable Iceberg table, verifies progress replay is
+idempotent, then removes all test objects. This covers the production manifest
+path rather than only in-memory merge behavior.

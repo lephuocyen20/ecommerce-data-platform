@@ -12,12 +12,12 @@ if AIRFLOW_PROJECT_PATH not in sys.path:
     sys.path.insert(0, AIRFLOW_PROJECT_PATH)
 
 from common.runtime_policy import is_feature_enabled, require_feature_enabled
-from common.lakehouse_policy import ICEBERG, customers_silver_source, require_iceberg_cutover_enabled
+from common.lakehouse_policy import ICEBERG, require_iceberg_table_cutover, silver_source
 from pipeline_contracts import TABLES
 
 
 @task(trigger_rule="none_failed_min_one_success", retries=0)
-def warehouse_gate(summary: dict, iceberg_checkpoint=None):
+def warehouse_gate(summary: dict, iceberg_checkpoints=None):
     """Validate pipeline summary before Warehouse loading."""
     if not isinstance(summary, dict):
         raise ValueError("Missing pipeline summary")
@@ -60,15 +60,18 @@ def warehouse_gate(summary: dict, iceberg_checkpoint=None):
             "tables": tables,
         }
     ready_tables = [table_name for table_name in tables if results[table_name]["status"] == "PASS"]
-    # Customers are loaded by the separately gated Iceberg adapter after its
-    # dual-run reconciliation. Do not present the same batch to strict legacy
-    # Parquet selection, otherwise its existing checkpoint is interpreted as a
-    # missing batch.
-    if customers_silver_source() == ICEBERG:
-        require_iceberg_cutover_enabled()
-        if not isinstance(iceberg_checkpoint, dict) or iceberg_checkpoint.get("source_type") != ICEBERG:
-            raise RuntimeError("Iceberg customers checkpoint was not verified before Warehouse cutover")
-        ready_tables = [table_name for table_name in ready_tables if table_name != "customers"]
+    # Each table cut over to Iceberg is loaded by its separately gated adapter.
+    # Excluding it here prevents strict legacy Parquet selection from loading a
+    # second copy of the same incremental batch.
+    checkpoints = iceberg_checkpoints if isinstance(iceberg_checkpoints, dict) else {}
+    for table_name in list(ready_tables):
+        if silver_source(table_name) != ICEBERG:
+            continue
+        require_iceberg_table_cutover(table_name)
+        checkpoint = checkpoints.get(table_name)
+        if not isinstance(checkpoint, dict) or checkpoint.get("source_type") != ICEBERG:
+            raise RuntimeError(f"Iceberg {table_name} checkpoint was not verified before Warehouse cutover")
+        ready_tables.remove(table_name)
     if not ready_tables:
         return {
             "status": "SKIP",

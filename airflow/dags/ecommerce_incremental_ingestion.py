@@ -11,8 +11,8 @@ if AIRFLOW_PROJECT_PATH not in sys.path:
     sys.path.insert(0, AIRFLOW_PROJECT_PATH)
 
 from pipeline_contracts import GOLD_DATASET_SOURCES, TABLES
-from pipeline_operators import (create_dbt_build_operator, create_gold_write_operator, create_incremental_silver_operator, create_silver_snapshot_operator, create_silver_parquet_to_iceberg_customers_operator, create_reconcile_iceberg_customers_operator, create_iceberg_customers_warehouse_operator)
-from pipeline_tasks.lakehouse import check_lakehouse_customers_eligibility, skip_iceberg_customers, verify_iceberg_customers_checkpoint
+from pipeline_operators import (create_dbt_build_operator, create_gold_write_operator, create_incremental_silver_operator, create_silver_snapshot_operator, create_silver_parquet_to_iceberg_customers_operator, create_reconcile_iceberg_customers_operator, create_iceberg_customers_warehouse_operator, create_silver_parquet_to_iceberg_products_operator, create_reconcile_iceberg_products_operator, create_iceberg_products_warehouse_operator)
+from pipeline_tasks.lakehouse import (check_lakehouse_customers_eligibility, skip_iceberg_customers, verify_iceberg_customers_checkpoint, check_lakehouse_products_eligibility, skip_iceberg_products, verify_iceberg_products_checkpoint)
 from pipeline_tasks.gold import (gold_snapshot_gate, prepare_gold_dataset_sources_task, resolve_gold_snapshot_lineage_task, skip_gold_layer)
 from pipeline_tasks.ingestion import ingest_incremental, validate_config, validate_incremental
 from pipeline_tasks.silver import (check_silver_eligibility, pipeline_summary, silver_result, skip_silver, verify_silver_manifest)
@@ -100,10 +100,21 @@ def ecommerce_incremental_ingestion():
     iceberg_customers >> iceberg_reconcile
     iceberg_reconcile >> iceberg_warehouse_loader >> iceberg_checkpoint
 
+    products_lakehouse_gate = check_lakehouse_products_eligibility(validation_results["products"])
+    iceberg_products = create_silver_parquet_to_iceberg_products_operator(project_path=PROJECT_PATH)
+    iceberg_products_skip = skip_iceberg_products(validation_results["products"])
+    iceberg_products_reconcile = create_reconcile_iceberg_products_operator(project_path=PROJECT_PATH)
+    iceberg_products_warehouse_loader = create_iceberg_products_warehouse_operator(project_path=PROJECT_PATH)
+    iceberg_products_checkpoint = verify_iceberg_products_checkpoint(validation_results["products"])
+    silver_verify_tasks["products"] >> products_lakehouse_gate
+    products_lakehouse_gate >> [iceberg_products, iceberg_products_skip]
+    iceberg_products >> iceberg_products_reconcile
+    iceberg_products_reconcile >> iceberg_products_warehouse_loader >> iceberg_products_checkpoint
+
     pipeline_summary_task = pipeline_summary()
     for table_name in TABLES:
         silver_result_tasks[table_name] >> pipeline_summary_task
-    warehouse_gate_task = warehouse_gate(pipeline_summary_task, iceberg_checkpoint)
+    warehouse_gate_task = warehouse_gate(pipeline_summary_task, {"customers": iceberg_checkpoint, "products": iceberg_products_checkpoint})
     warehouse_loader_task = load_warehouse(warehouse_gate_task)
     dbt_eligibility_task = check_dbt_eligibility(warehouse_loader_task)
     dbt_eligibility_task >> [dbt_build_task, skip_dbt()]
