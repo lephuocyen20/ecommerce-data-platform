@@ -11,6 +11,9 @@ x-airflow-common: &airflow-common
     AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-change_this_local_password}
     AIRFLOW_SIMPLE_AUTH_PASSWORDS_FILE: /opt/airflow/auth/simple_auth_manager_passwords.json
     INGESTION_WRITE_ENABLED: "${INGESTION_WRITE_ENABLED:-false}"
+    LAKEHOUSE_WRITE_ENABLED: "${LAKEHOUSE_WRITE_ENABLED:-false}"
+    CUSTOMERS_SILVER_SOURCE: "${CUSTOMERS_SILVER_SOURCE:-parquet}"
+    CUSTOMERS_ICEBERG_CUTOVER_ENABLED: "${CUSTOMERS_ICEBERG_CUTOVER_ENABLED:-false}"
 
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
@@ -22,7 +25,7 @@ x-airflow-common: &airflow-common
     DB_USER: ecommerce_user
     DB_PASSWORD: ${DB_PASSWORD}
 
-    MINIO_ENDPOINT: minio:9000
+    MINIO_ENDPOINT: ${MINIO_DOCKER_ENDPOINT:-minio:9000}
     MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
     MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
     BRONZE_BUCKET: ${BRONZE_BUCKET}
@@ -74,6 +77,43 @@ services:
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
+
+  nessie:
+    image: ${NESSIE_IMAGE:-ghcr.io/projectnessie/nessie:0.108.8}
+    container_name: ecommerce-nessie
+    # The named volume is created as root by Docker Desktop; run the local
+    # single-node catalog as root so RocksDB can initialize its first files.
+    user: "0:0"
+    restart: unless-stopped
+    environment:
+      NESSIE_VERSION_STORE_TYPE: ROCKSDB
+      NESSIE_VERSION_STORE_PERSIST_ROCKS_DATABASE_PATH: /var/lib/nessie
+      NESSIE_CATALOG_DEFAULT_WAREHOUSE: lakehouse
+      NESSIE_CATALOG_WAREHOUSES_LAKEHOUSE_LOCATION: s3a://${BRONZE_BUCKET}/lakehouse
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_ENDPOINT: http://minio:9000
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_PATH_STYLE_ACCESS: "true"
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_REGION: us-east-1
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_REMOTE_SIGNING_ENABLED: "false"
+      # Nessie REST Catalog requires object-store credentials to be resolved
+      # through its secret provider rather than supplied as plaintext options.
+      JAVA_OPTS_APPEND: >-
+        -Dnessie.catalog.service.s3.default-options.access-key=urn:nessie-secret:quarkus:minio-credentials
+        -Dminio-credentials.name=${MINIO_ACCESS_KEY}
+        -Dminio-credentials.secret=${MINIO_SECRET_KEY}
+    ports:
+      - "19120:19120"
+    healthcheck:
+      # Nessie 0.108 exposes its version-store configuration at this endpoint.
+      # A successful response proves the HTTP server and RocksDB store are ready.
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:19120/api/v2/config >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    volumes:
+      - nessie_data:/var/lib/nessie
+    depends_on:
+      - minio
 
   dbt-runner:
     build:
@@ -192,3 +232,4 @@ volumes:
   postgres_data:
   minio_data:
   airflow_auth:
+  nessie_data:

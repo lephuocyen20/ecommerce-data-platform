@@ -1,6 +1,7 @@
 """Warehouse and dbt TaskFlow tasks for the incremental DAG."""
 
 import logging
+import os
 import re
 import sys
 
@@ -11,11 +12,12 @@ if AIRFLOW_PROJECT_PATH not in sys.path:
     sys.path.insert(0, AIRFLOW_PROJECT_PATH)
 
 from common.runtime_policy import is_feature_enabled, require_feature_enabled
+from common.lakehouse_policy import ICEBERG, customers_silver_source, require_iceberg_cutover_enabled
 from pipeline_contracts import TABLES
 
 
-@task(retries=0)
-def warehouse_gate(summary: dict):
+@task(trigger_rule="none_failed_min_one_success", retries=0)
+def warehouse_gate(summary: dict, iceberg_checkpoint=None):
     """Validate pipeline summary before Warehouse loading."""
     if not isinstance(summary, dict):
         raise ValueError("Missing pipeline summary")
@@ -58,6 +60,15 @@ def warehouse_gate(summary: dict):
             "tables": tables,
         }
     ready_tables = [table_name for table_name in tables if results[table_name]["status"] == "PASS"]
+    # Customers are loaded by the separately gated Iceberg adapter after its
+    # dual-run reconciliation. Do not present the same batch to strict legacy
+    # Parquet selection, otherwise its existing checkpoint is interpreted as a
+    # missing batch.
+    if customers_silver_source() == ICEBERG:
+        require_iceberg_cutover_enabled()
+        if not isinstance(iceberg_checkpoint, dict) or iceberg_checkpoint.get("source_type") != ICEBERG:
+            raise RuntimeError("Iceberg customers checkpoint was not verified before Warehouse cutover")
+        ready_tables = [table_name for table_name in ready_tables if table_name != "customers"]
     if not ready_tables:
         return {
             "status": "SKIP",

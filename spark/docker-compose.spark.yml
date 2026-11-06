@@ -5,22 +5,36 @@ services:
       dockerfile: spark/Dockerfile
     image: ecommerce-spark:3.5.6
     environment:
+      # `.env` uses localhost for host-run scripts; containers must use the
+      # Compose service DNS name instead.
+      MINIO_ENDPOINT: ${MINIO_DOCKER_ENDPOINT:-minio:9000}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       BRONZE_BUCKET: ${BRONZE_BUCKET}
+      NESSIE_URI: ${NESSIE_URI:-http://nessie:19120/iceberg}
+      NESSIE_REF: ${NESSIE_REF:-main}
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      AWS_REGION: us-east-1
     container_name: ecommerce-spark
     command: sleep infinity
     env_file:
       - .env
     volumes:
+      - ./pytest.ini:/opt/spark/work-dir/pytest.ini:ro
       - ./common:/opt/spark/work-dir/common:ro
       - ./ingestion:/opt/spark/work-dir/ingestion:ro
       - ./silver:/opt/spark/work-dir/silver:ro
       - ./gold:/opt/spark/work-dir/gold:ro
+      - ./lakehouse:/opt/spark/work-dir/lakehouse:ro
+      - ./tests:/opt/spark/work-dir/tests:ro
       - ./transformation:/opt/spark/work-dir/transformation
       - ./validation:/opt/spark/work-dir/validation
     networks:
       - ecommerce-network
+    depends_on:
+      nessie:
+        condition: service_healthy
 
 networks:
   ecommerce-network:

@@ -7,6 +7,7 @@ def insert_loaded_batch(
     manifest_key,
     manifest,
     loaded_row_count,
+    source_lineage=None,
 ):
     """
     Insert a successfully loaded Silver batch checkpoint.
@@ -33,6 +34,19 @@ def insert_loaded_batch(
     ):
         raise ValueError("Batch and Silver manifest mismatch")
 
+    if source_lineage is None:
+        source_lineage = {
+            "source_type": "parquet",
+            "iceberg_table": None,
+            "iceberg_catalog_ref": None,
+            "iceberg_snapshot_id": None,
+        }
+    try:
+        from source_lineage import validate_source_lineage
+    except ModuleNotFoundError:
+        from warehouse.loader.source_lineage import validate_source_lineage
+    source_lineage = validate_source_lineage(**source_lineage)
+
     query = """
         INSERT INTO warehouse.loaded_batches (
             batch_id,
@@ -45,7 +59,11 @@ def insert_loaded_batch(
             silver_manifest_key,
             silver_data_prefix,
             silver_row_count,
-            loaded_row_count
+            loaded_row_count,
+            source_type,
+            iceberg_table,
+            iceberg_catalog_ref,
+            iceberg_snapshot_id
         )
         VALUES (
             %(batch_id)s,
@@ -58,7 +76,11 @@ def insert_loaded_batch(
             %(silver_manifest_key)s,
             %(silver_data_prefix)s,
             %(silver_row_count)s,
-            %(loaded_row_count)s
+            %(loaded_row_count)s,
+            %(source_type)s,
+            %(iceberg_table)s,
+            %(iceberg_catalog_ref)s,
+            %(iceberg_snapshot_id)s
         )
     """
 
@@ -74,6 +96,7 @@ def insert_loaded_batch(
         "silver_data_prefix": manifest["data_prefix"],
         "silver_row_count": manifest["silver_row_count"],
         "loaded_row_count": loaded_row_count,
+        **source_lineage,
     }
 
     with conn.cursor() as cursor:
