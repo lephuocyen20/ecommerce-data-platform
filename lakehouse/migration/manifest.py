@@ -22,8 +22,8 @@ def read_manifest(client, bucket, key, table_name):
 def discover_manifests(client, bucket, table_name):
     manifests = [(item.object_name, read_manifest(client, bucket, item.object_name, table_name)) for item in client.list_objects(bucket, prefix=_prefix(table_name), recursive=True) if item.object_name.endswith("/_BATCH_METADATA.json")]
     return sorted(manifests, key=lambda item: (item[1].get("completed_at", ""), item[1]["batch_id"]))
-def migrate_manifest(spark, client, bucket, key, table_name, manifest=None):
-    manifest = read_manifest(client, bucket, key, table_name) if manifest is None else manifest; batch, prefix = _validate(table_name, key, manifest); progress = f"lakehouse.metadata.{table_name}_parquet_migration_progress"
+def migrate_manifest(spark, client, bucket, key, table_name, manifest=None, *, table=None, progress_table=None):
+    manifest = read_manifest(client, bucket, key, table_name) if manifest is None else manifest; batch, prefix = _validate(table_name, key, manifest); progress = progress_table or f"lakehouse.metadata.{table_name}_parquet_migration_progress"
     spark.sql("CREATE NAMESPACE IF NOT EXISTS lakehouse.metadata"); spark.sql(f"CREATE TABLE IF NOT EXISTS {progress} (batch_id STRING, manifest_key STRING, manifest_identity STRING, snapshot_id BIGINT, completed_at TIMESTAMP) USING iceberg")
     if discover_parquet_objects(client, bucket, prefix, include_etag=True) != sorted(manifest["parquet_objects"], key=lambda item: item["object_key"]): raise ValueError(f"{table_name} Parquet inventory mismatch")
     digest = _identity(manifest); existing = spark.sql(f"SELECT manifest_identity, snapshot_id FROM {progress} WHERE batch_id = '{batch}'").collect()
@@ -32,6 +32,6 @@ def migrate_manifest(spark, client, bucket, key, table_name, manifest=None):
         return {"status":"ALREADY_MIGRATED", "batch_id":batch, "snapshot_id":int(existing[0].snapshot_id)}
     model = _model(table_name); prepare = getattr(model, f"prepare_{table_name}"); merge = getattr(model, f"merge_{table_name}"); source = spark.read.parquet(f"s3a://{bucket}/{prefix}")
     if source.count() != manifest["silver_row_count"]: raise ValueError(f"{table_name} row count mismatch")
-    merge(spark, prepare(source, batch)); table = getattr(model, "TABLE", f"lakehouse.silver.{table_name}"); snapshot = int(spark.sql(f"SELECT snapshot_id FROM {table}.snapshots ORDER BY committed_at DESC LIMIT 1").first().snapshot_id)
+    target_table = table or getattr(model, "TABLE", f"lakehouse.silver.{table_name}"); merge(spark, prepare(source, batch), target_table); snapshot = int(spark.sql(f"SELECT snapshot_id FROM {target_table}.snapshots ORDER BY committed_at DESC LIMIT 1").first().snapshot_id)
     spark.sql(f"INSERT INTO {progress} VALUES ('{batch}', '{key}', '{digest}', {snapshot}, current_timestamp())")
-    return {"status":"MIGRATED", "batch_id":batch, "snapshot_id":snapshot}
+    return {"status":"MIGRATED", "batch_id":batch, "snapshot_id":snapshot, "row_count":spark.table(target_table).count()}

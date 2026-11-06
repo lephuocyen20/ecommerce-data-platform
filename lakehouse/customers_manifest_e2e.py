@@ -18,7 +18,7 @@ from pyspark.sql import SparkSession
 sys.path.insert(0, "/opt/spark/work-dir")
 from common.minio import configure_s3a, get_minio_settings
 from common.object_integrity import discover_parquet_objects
-from lakehouse.migration.parquet_customers import migrate_manifest
+from lakehouse.migration.manifest import migrate_manifest
 
 
 def main():
@@ -46,8 +46,8 @@ def main():
             "completed_at": datetime.now(timezone.utc).isoformat(), "parquet_objects": objects,
         }
         client.put_object(bucket, manifest_key, __import__("io").BytesIO(json.dumps(manifest).encode()), len(json.dumps(manifest).encode()), content_type="application/json")
-        first = migrate_manifest(spark, client, bucket, manifest_key, table=table, progress_table=progress_table)
-        replay = migrate_manifest(spark, client, bucket, manifest_key, table=table, progress_table=progress_table)
+        first = migrate_manifest(spark, client, bucket, manifest_key, "customers", table=table, progress_table=progress_table)
+        replay = migrate_manifest(spark, client, bucket, manifest_key, "customers", table=table, progress_table=progress_table)
         assert first["status"] == "MIGRATED" and first["row_count"] == 2
         assert replay["status"] == "ALREADY_MIGRATED"
         assert spark.table(table).select("customer_id").distinct().count() == 2
