@@ -9,7 +9,7 @@ from pyspark.sql import SparkSession, functions as F
 
 sys.path.insert(0, "/opt/spark/work-dir")
 from common.minio import configure_s3a, get_minio_settings
-from lakehouse.migration.parquet_order_items import discover
+from lakehouse.migration.manifest import discover_manifests
 
 BUSINESS_COLUMNS = ("order_item_id", "order_id", "product_id", "quantity", "unit_price", "discount_amount")
 
@@ -34,7 +34,7 @@ def main():
     settings = get_minio_settings()
     bucket = os.environ["BRONZE_BUCKET"]
     client = Minio(settings["endpoint"], access_key=settings["access_key"], secret_key=settings["secret_key"], secure=False)
-    manifests = discover(client, bucket)
+    manifests = discover_manifests(client, bucket, "order_items")
     if not manifests:
         raise ValueError("No completed order_items Silver manifests found")
     spark = SparkSession.builder.appName("ReconcileIcebergOrderItems").getOrCreate()

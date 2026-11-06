@@ -10,7 +10,7 @@ from pyspark.sql.window import Window
 
 sys.path.insert(0, "/opt/spark/work-dir")
 from common.minio import configure_s3a, get_minio_settings
-from lakehouse.migration.parquet_customers import discover_manifests
+from lakehouse.migration.manifest import discover_manifests
 
 
 def main():
@@ -21,7 +21,7 @@ def main():
     import os
     bucket = os.environ["BRONZE_BUCKET"]
     client = Minio(settings["endpoint"], access_key=settings["access_key"], secret_key=settings["secret_key"], secure=False)
-    manifests = discover_manifests(client, bucket)
+    manifests = discover_manifests(client, bucket, "customers")
     if not manifests:
         raise ValueError("No completed customers Silver manifests found")
     spark = SparkSession.builder.appName("ReconcileIcebergCustomers").getOrCreate()

@@ -9,13 +9,13 @@ from pyspark.sql.window import Window
 
 sys.path.insert(0, "/opt/spark/work-dir")
 from common.minio import configure_s3a, get_minio_settings
-from lakehouse.migration.parquet_products import discover_manifests
+from lakehouse.migration.manifest import discover_manifests
 
 
 def main():
     settings = get_minio_settings(); bucket = os.environ["BRONZE_BUCKET"]
     client = Minio(settings["endpoint"], access_key=settings["access_key"], secret_key=settings["secret_key"], secure=False)
-    manifests = discover_manifests(client, bucket)
+    manifests = discover_manifests(client, bucket, "products")
     if not manifests: raise ValueError("No completed products manifests found")
     spark = SparkSession.builder.appName("ReconcileIcebergProducts").getOrCreate()
     try:

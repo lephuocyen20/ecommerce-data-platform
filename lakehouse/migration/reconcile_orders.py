@@ -5,13 +5,13 @@ from pyspark.sql import SparkSession, functions as F
 from pyspark.sql.window import Window
 sys.path.insert(0, "/opt/spark/work-dir")
 from common.minio import configure_s3a, get_minio_settings
-from lakehouse.migration.parquet_orders import discover_manifests
+from lakehouse.migration.manifest import discover_manifests
 
 COLS = ["order_id", "customer_id", "status", "order_date", "updated_at"]
 def hashes(frame): return frame.select("order_id", F.sha2(F.concat_ws("||", *[F.coalesce(F.col(c).cast("string"), F.lit("")) for c in COLS]), 256).alias("business_hash"))
 def main():
     settings = get_minio_settings(); bucket = os.environ["BRONZE_BUCKET"]; client = Minio(settings["endpoint"], access_key=settings["access_key"], secret_key=settings["secret_key"], secure=False)
-    manifests = discover_manifests(client, bucket)
+    manifests = discover_manifests(client, bucket, "orders")
     if not manifests: raise ValueError("No completed orders manifests found")
     spark = SparkSession.builder.appName("ReconcileIcebergOrders").getOrCreate()
     try:
