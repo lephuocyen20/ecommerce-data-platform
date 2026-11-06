@@ -6,11 +6,21 @@ from pyspark.sql import SparkSession
 
 sys.path.insert(0, "/opt/spark/work-dir")
 from common.minio import configure_s3a
-from lakehouse.models.customers import latest_snapshot_id, merge_customers, prepare_customers, validate_customers
+from lakehouse.models.engine import merge, prepare
+from lakehouse.models.spec import SPECS
 
 
 TABLE = "lakehouse.validation.customers_m2_e2e"
 COLS = ["customer_id", "full_name", "email", "created_at", "updated_at"]
+SPEC = SPECS["customers"]
+
+def prepare_customers(frame, batch_id): return prepare(frame, SPEC, batch_id)
+def merge_customers(spark, frame, table): return merge(spark, frame, SPEC, table)
+def latest_snapshot_id(spark, table): return int(spark.sql(f"SELECT snapshot_id FROM {table}.snapshots ORDER BY committed_at DESC LIMIT 1").first().snapshot_id)
+def validate_customers(spark, table):
+    frame=spark.table(table); rows=frame.count(); nulls=frame.filter("customer_id IS NULL").count(); duplicates=frame.groupBy("customer_id").count().filter("count>1").count()
+    if nulls or duplicates: raise ValueError("customers quality failed")
+    return {"row_count":rows,"null_keys":nulls,"duplicate_keys":duplicates}
 
 
 def rows(spark, values):
