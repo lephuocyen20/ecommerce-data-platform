@@ -94,8 +94,8 @@ def create_reconcile_iceberg_customers_operator(*, project_path):
     return create_spark_submit_operator(
         task_id="verify_iceberg_customers",
         project_path=project_path,
-        script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile_customers.py",
-        arguments=["--manifest-key", manifest_key],
+        script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile.py",
+        arguments=["--table-name", "customers"],
         extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)],
         retries=0,
     )
@@ -105,24 +105,24 @@ def create_reconcile_iceberg_products_operator(*, project_path):
     manifest_key = "{{ ti.xcom_pull(task_ids='verify_silver_products')['manifest_key'] }}"
     return create_spark_submit_operator(
         task_id="verify_iceberg_products", project_path=project_path,
-        script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile_products.py", arguments=["--manifest-key", manifest_key],
+        script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile.py", arguments=["--table-name", "products"],
         extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0,
     )
 
 def create_reconcile_iceberg_orders_operator(*, project_path):
     key = "{{ ti.xcom_pull(task_ids='verify_silver_orders')['manifest_key'] }}"
-    return create_spark_submit_operator(task_id="verify_iceberg_orders", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile_orders.py", arguments=["--manifest-key", key], extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+    return create_spark_submit_operator(task_id="verify_iceberg_orders", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile.py", arguments=["--table-name", "orders"], extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
 
 
 def create_reconcile_iceberg_order_items_operator(*, project_path):
-    return create_spark_submit_operator(task_id="verify_iceberg_order_items", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile_order_items.py", extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+    return create_spark_submit_operator(task_id="verify_iceberg_order_items", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile.py", arguments=["--table-name", "order_items"], extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
 
 
 def create_reconcile_iceberg_payments_operator(*, project_path):
-    return create_spark_submit_operator(task_id="verify_iceberg_payments", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile_payments.py", extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+    return create_spark_submit_operator(task_id="verify_iceberg_payments", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile.py", arguments=["--table-name", "payments"], extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
 
 def create_reconcile_iceberg_shipments_operator(*, project_path):
-    return create_spark_submit_operator(task_id="verify_iceberg_shipments", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile_shipments.py", extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+    return create_spark_submit_operator(task_id="verify_iceberg_shipments", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile.py", arguments=["--table-name", "shipments"], extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
 
 
 def create_iceberg_customers_warehouse_operator(*, project_path):
