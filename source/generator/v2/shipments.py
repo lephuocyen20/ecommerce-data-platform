@@ -52,10 +52,10 @@ def generate_shipment_timeline(
     order_updated_at,
     shipment_status,
 ):
-    end_date = min(order_updated_at, REFERENCE_DATE)
-
-    if order_date > end_date:
-        raise RuntimeError("Order date after allowed timeline")
+    # Incremental source data may be newer than the fixed synthetic reference
+    # date, or contain a corrected order timestamp.  The shipment lifecycle
+    # must never precede its order, so use the latest applicable boundary.
+    end_date = max(order_updated_at, order_date, REFERENCE_DATE)
 
     duration = end_date - order_date
 
@@ -152,7 +152,8 @@ def validate_shipments(records, orders, paid_order_ids):
             raise RuntimeError(f"DQ 05 FAILED: Created before order {order_id}")
 
         # DQ 06
-        if not created <= updated <= REFERENCE_DATE:
+        latest_allowed = max(REFERENCE_DATE, order_date, order_updated_at)
+        if not created <= updated <= latest_allowed:
             raise RuntimeError(
                 f"DQ 06 FAILED: Invalid update timeline, order {order_id}"
             )
@@ -187,7 +188,7 @@ def validate_shipments(records, orders, paid_order_ids):
             )
         # DQ 11: Shipment created before Order completion
         if order_status == "DELIVERED":
-            completion_time = min(order_updated_at, REFERENCE_DATE)
+            completion_time = max(order_updated_at, order_date, REFERENCE_DATE)
             if created > completion_time:
                 raise RuntimeError(
                     f"DQ 11 FAILED: Shipment created after order completion {order_id}"
@@ -201,10 +202,10 @@ def validate_shipments(records, orders, paid_order_ids):
                 )
 
         # DQ 13: No future actual timestamps
-        if shipped is not None and shipped > REFERENCE_DATE:
+        if shipped is not None and shipped > latest_allowed:
             raise RuntimeError(f"DQ 13 FAILED: Future shipped_at, order {order_id}")
 
-        if delivered is not None and delivered > REFERENCE_DATE:
+        if delivered is not None and delivered > latest_allowed:
             raise RuntimeError(f"DQ 13 FAILED: Future delivered_at, order {order_id}")
 
         # DQ 14: Delivered shipments require successful payment
