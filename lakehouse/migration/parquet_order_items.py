@@ -1,7 +1,7 @@
 """Verified Silver Parquet to Iceberg order-items migration."""
 import hashlib, json
 from common.object_integrity import discover_parquet_objects
-from lakehouse.order_items import TABLE, merge_order_items, prepare_order_items
+from lakehouse.models.order_items import TABLE, merge_order_items, prepare_order_items
 PREFIX="silver_incremental/order_items/"; PROGRESS_TABLE="lakehouse.metadata.order_items_parquet_migration_progress"
 def identity(m): return hashlib.sha256(json.dumps(m,sort_keys=True,separators=(",",":")).encode()).hexdigest()
 def validate(key,m):

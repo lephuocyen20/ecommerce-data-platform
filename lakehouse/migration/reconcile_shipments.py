@@ -4,7 +4,7 @@ from minio import Minio
 from pyspark.sql import SparkSession, functions as F
 sys.path.insert(0, "/opt/spark/work-dir")
 from common.minio import configure_s3a, get_minio_settings
-from lakehouse.parquet_shipments import discover_manifests
+from lakehouse.migration.parquet_shipments import discover_manifests
 
 COLS = ("shipment_id", "order_id", "carrier", "tracking_number", "shipping_address", "shipping_fee", "status", "shipped_at", "delivered_at", "estimated_delivery_at", "created_at", "updated_at")
 settings = get_minio_settings(); bucket = os.environ["BRONZE_BUCKET"]; client = Minio(settings["endpoint"], access_key=settings["access_key"], secret_key=settings["secret_key"], secure=False); manifests = discover_manifests(client, bucket)

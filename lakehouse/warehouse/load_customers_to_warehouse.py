@@ -7,7 +7,7 @@ from pyspark.sql import SparkSession
 sys.path.insert(0, "/opt/spark/work-dir")
 sys.path.insert(0, "/opt/spark/work-dir/warehouse/loader")
 from common.minio import configure_s3a
-from lakehouse.warehouse_customers_reader import read_customers_snapshot
+from lakehouse.warehouse.warehouse_customers_reader import read_customers_snapshot
 from incremental_silver_to_warehouse import get_committed_batches, get_connection
 from warehouse_batch_loader import load_iceberg_customers_batch
 

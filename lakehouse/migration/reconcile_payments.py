@@ -4,7 +4,7 @@ from minio import Minio
 from pyspark.sql import SparkSession, functions as F
 sys.path.insert(0, "/opt/spark/work-dir")
 from common.minio import configure_s3a, get_minio_settings
-from lakehouse.parquet_payments import discover_manifests
+from lakehouse.migration.parquet_payments import discover_manifests
 
 COLS = ("payment_id", "order_id", "amount", "payment_method", "status", "transaction_id", "created_at")
 settings = get_minio_settings(); bucket = os.environ["BRONZE_BUCKET"]; client = Minio(settings["endpoint"], access_key=settings["access_key"], secret_key=settings["secret_key"], secure=False); manifests = discover_manifests(client, bucket)

@@ -4,7 +4,7 @@ import hashlib
 import json
 from common.object_integrity import discover_parquet_objects
 
-from lakehouse.products import merge_products, prepare_products
+from lakehouse.models.products import merge_products, prepare_products
 
 
 TABLE = "lakehouse.silver.products"

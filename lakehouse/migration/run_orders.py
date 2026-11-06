@@ -3,7 +3,7 @@ import argparse, json, os, sys
 from pyspark.sql import SparkSession
 sys.path.insert(0, "/opt/spark/work-dir")
 from common.minio import configure_s3a, create_minio_client
-from lakehouse.parquet_orders import migrate_all_manifests, migrate_manifest
+from lakehouse.migration.parquet_orders import migrate_all_manifests, migrate_manifest
 def main():
     parser = argparse.ArgumentParser(); group = parser.add_mutually_exclusive_group(required=True); group.add_argument("--manifest-key"); group.add_argument("--backfill", action="store_true"); args = parser.parse_args()
     if os.getenv("LAKEHOUSE_WRITE_ENABLED", "false").lower() != "true": raise RuntimeError("Lakehouse write blocked: set LAKEHOUSE_WRITE_ENABLED=true")

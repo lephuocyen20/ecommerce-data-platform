@@ -8,7 +8,7 @@ from pyspark.sql import SparkSession
 
 sys.path.insert(0, "/opt/spark/work-dir")
 from common.minio import configure_s3a, create_minio_client
-from lakehouse.parquet_products import migrate_all_manifests, migrate_manifest
+from lakehouse.migration.parquet_products import migrate_all_manifests, migrate_manifest
 
 
 def main():

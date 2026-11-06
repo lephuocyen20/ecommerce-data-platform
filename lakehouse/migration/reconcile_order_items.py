@@ -9,7 +9,7 @@ from pyspark.sql import SparkSession, functions as F
 
 sys.path.insert(0, "/opt/spark/work-dir")
 from common.minio import configure_s3a, get_minio_settings
-from lakehouse.parquet_order_items import discover
+from lakehouse.migration.parquet_order_items import discover
 
 BUSINESS_COLUMNS = ("order_item_id", "order_id", "product_id", "quantity", "unit_price", "discount_amount")
 

@@ -2,7 +2,7 @@
 import hashlib
 import json
 from common.object_integrity import discover_parquet_objects
-from lakehouse.orders import TABLE, latest_snapshot_id, merge_orders, prepare_orders, validate_orders
+from lakehouse.models.orders import TABLE, latest_snapshot_id, merge_orders, prepare_orders, validate_orders
 
 PROGRESS_TABLE = "lakehouse.metadata.orders_parquet_migration_progress"
 PREFIX = "silver_incremental/orders/"

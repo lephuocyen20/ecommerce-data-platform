@@ -2,7 +2,7 @@ import argparse, sys
 from pyspark.sql import SparkSession
 sys.path[:0] = ["/opt/spark/work-dir", "/opt/spark/work-dir/warehouse/loader"]
 from common.minio import configure_s3a
-from lakehouse.warehouse_payments_reader import read_payments_snapshot
+from lakehouse.warehouse.warehouse_payments_reader import read_payments_snapshot
 from incremental_silver_to_warehouse import get_committed_batches, get_connection
 from warehouse_batch_loader import load_iceberg_payments_batch
 

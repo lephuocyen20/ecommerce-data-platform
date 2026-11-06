@@ -1,6 +1,6 @@
 import pytest
 
-from lakehouse.warehouse_customers_reader import BUSINESS_COLUMNS, IcebergCustomersBatch
+from lakehouse.warehouse.warehouse_customers_reader import BUSINESS_COLUMNS, IcebergCustomersBatch
 
 
 @pytest.mark.unit

@@ -9,7 +9,7 @@ from pyspark.sql.window import Window
 
 sys.path.insert(0, "/opt/spark/work-dir")
 from common.minio import configure_s3a, get_minio_settings
-from lakehouse.parquet_products import discover_manifests
+from lakehouse.migration.parquet_products import discover_manifests
 
 
 def main():

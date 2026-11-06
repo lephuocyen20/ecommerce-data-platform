@@ -9,7 +9,7 @@ from pyspark.sql import SparkSession
 
 sys.path.insert(0, "/opt/spark/work-dir")
 from common.minio import configure_s3a
-from lakehouse.parquet_customers import migrate_all_manifests, migrate_manifest
+from lakehouse.migration.parquet_customers import migrate_all_manifests, migrate_manifest
 from common.minio import create_minio_client
 
 

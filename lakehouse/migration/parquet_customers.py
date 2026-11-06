@@ -8,7 +8,7 @@ from minio import Minio
 from minio.error import S3Error
 from pyspark.sql import functions as F
 
-from lakehouse.customers import latest_snapshot_id, merge_customers, prepare_customers, validate_customers
+from lakehouse.models.customers import latest_snapshot_id, merge_customers, prepare_customers, validate_customers
 from common.object_integrity import discover_parquet_objects
 
 

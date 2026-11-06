@@ -2,7 +2,7 @@ import pytest
 import sys
 from pathlib import Path
 
-from lakehouse.warehouse_order_items_reader import BUSINESS_COLUMNS, IcebergOrderItemsBatch
+from lakehouse.warehouse.warehouse_order_items_reader import BUSINESS_COLUMNS, IcebergOrderItemsBatch
 
 
 ROOT = Path(__file__).resolve().parents[1]

@@ -6,7 +6,7 @@ from pyspark.sql import SparkSession
 
 sys.path.insert(0, "/opt/spark/work-dir")
 from common.minio import configure_s3a
-from lakehouse.customers import latest_snapshot_id, merge_customers, prepare_customers, validate_customers
+from lakehouse.models.customers import latest_snapshot_id, merge_customers, prepare_customers, validate_customers
 
 
 TABLE = "lakehouse.validation.customers_m2_e2e"
