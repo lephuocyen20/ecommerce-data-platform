@@ -50,8 +50,8 @@ def create_silver_parquet_to_iceberg_customers_operator(*, project_path):
     return create_spark_submit_operator(
         task_id="silver_parquet_to_iceberg_customers",
         project_path=project_path,
-        script_path=f"{SPARK_WORKDIR}/lakehouse/migration/run_customers.py",
-        arguments=["--manifest-key", manifest_key],
+        script_path=f"{SPARK_WORKDIR}/lakehouse/migration/run.py",
+        arguments=["--table-name", "customers", "--manifest-key", manifest_key],
         extra_environment={"LAKEHOUSE_WRITE_ENABLED": os.environ.get("LAKEHOUSE_WRITE_ENABLED", "false")},
         extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)],
         retries=0,
@@ -63,30 +63,30 @@ def create_silver_parquet_to_iceberg_products_operator(*, project_path):
     manifest_key = "{{ ti.xcom_pull(task_ids='verify_silver_products')['manifest_key'] }}"
     return create_spark_submit_operator(
         task_id="silver_parquet_to_iceberg_products", project_path=project_path,
-        script_path=f"{SPARK_WORKDIR}/lakehouse/migration/run_products.py",
-        arguments=["--manifest-key", manifest_key],
+        script_path=f"{SPARK_WORKDIR}/lakehouse/migration/run.py",
+        arguments=["--table-name", "products", "--manifest-key", manifest_key],
         extra_environment={"LAKEHOUSE_WRITE_ENABLED": os.environ.get("LAKEHOUSE_WRITE_ENABLED", "false")},
         extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0,
     )
 
 def create_silver_parquet_to_iceberg_orders_operator(*, project_path):
     key = "{{ ti.xcom_pull(task_ids='verify_silver_orders')['manifest_key'] }}"
-    return create_spark_submit_operator(task_id="silver_parquet_to_iceberg_orders", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/run_orders.py", arguments=["--manifest-key", key], extra_environment={"LAKEHOUSE_WRITE_ENABLED": os.environ.get("LAKEHOUSE_WRITE_ENABLED", "false")}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+    return create_spark_submit_operator(task_id="silver_parquet_to_iceberg_orders", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/run.py", arguments=["--table-name", "orders", "--manifest-key", key], extra_environment={"LAKEHOUSE_WRITE_ENABLED": os.environ.get("LAKEHOUSE_WRITE_ENABLED", "false")}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
 
 
 def create_silver_parquet_to_iceberg_order_items_operator(*, project_path):
     """Migrate the verified Silver order-items manifest into Iceberg."""
     key = "{{ ti.xcom_pull(task_ids='verify_silver_order_items')['manifest_key'] }}"
-    return create_spark_submit_operator(task_id="silver_parquet_to_iceberg_order_items", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/run_order_items.py", arguments=["--manifest-key", key], extra_environment={"LAKEHOUSE_WRITE_ENABLED": os.environ.get("LAKEHOUSE_WRITE_ENABLED", "false")}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+    return create_spark_submit_operator(task_id="silver_parquet_to_iceberg_order_items", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/run.py", arguments=["--table-name", "order_items", "--manifest-key", key], extra_environment={"LAKEHOUSE_WRITE_ENABLED": os.environ.get("LAKEHOUSE_WRITE_ENABLED", "false")}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
 
 
 def create_silver_parquet_to_iceberg_payments_operator(*, project_path):
     key = "{{ ti.xcom_pull(task_ids='verify_silver_payments')['manifest_key'] }}"
-    return create_spark_submit_operator(task_id="silver_parquet_to_iceberg_payments", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/run_payments.py", arguments=["--manifest-key", key], extra_environment={"LAKEHOUSE_WRITE_ENABLED": os.environ.get("LAKEHOUSE_WRITE_ENABLED", "false")}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+    return create_spark_submit_operator(task_id="silver_parquet_to_iceberg_payments", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/run.py", arguments=["--table-name", "payments", "--manifest-key", key], extra_environment={"LAKEHOUSE_WRITE_ENABLED": os.environ.get("LAKEHOUSE_WRITE_ENABLED", "false")}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
 
 def create_silver_parquet_to_iceberg_shipments_operator(*, project_path):
     key = "{{ ti.xcom_pull(task_ids='verify_silver_shipments')['manifest_key'] }}"
-    return create_spark_submit_operator(task_id="silver_parquet_to_iceberg_shipments", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/run_shipments.py", arguments=["--manifest-key", key], extra_environment={"LAKEHOUSE_WRITE_ENABLED": os.environ.get("LAKEHOUSE_WRITE_ENABLED", "false")}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+    return create_spark_submit_operator(task_id="silver_parquet_to_iceberg_shipments", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/run.py", arguments=["--table-name", "shipments", "--manifest-key", key], extra_environment={"LAKEHOUSE_WRITE_ENABLED": os.environ.get("LAKEHOUSE_WRITE_ENABLED", "false")}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
 
 
 def create_reconcile_iceberg_customers_operator(*, project_path):

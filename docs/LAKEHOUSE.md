@@ -62,13 +62,13 @@ Silver Parquet manifest -> Iceberg customers -> cumulative reconciliation
 Backfill all historical manifests (explicit write permission required):
 
 ```powershell
-docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run_customers.py --backfill
+docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run.py --table-name customers --backfill
 ```
 
 Migrate one verified batch:
 
 ```powershell
-docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run_customers.py --manifest-key silver_incremental/customers/batch_id=<batch-id>/_BATCH_METADATA.json
+docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run.py --table-name customers --manifest-key silver_incremental/customers/batch_id=<batch-id>/_BATCH_METADATA.json
 ```
 
 Reconcile cumulative Parquet and Iceberg state:
@@ -92,10 +92,10 @@ Silver Parquet manifest -> Iceberg products -> cumulative reconciliation
 
 ```powershell
 # Historical backfill (explicit write permission)
-docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run_products.py --backfill
+docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run.py --table-name products --backfill
 
 # One incremental manifest
-docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run_products.py --manifest-key silver_incremental/products/batch_id=<batch-id>/_BATCH_METADATA.json
+docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run.py --table-name products --manifest-key silver_incremental/products/batch_id=<batch-id>/_BATCH_METADATA.json
 
 # Read-only cumulative reconciliation
 docker exec ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/reconcile_products.py
@@ -114,10 +114,10 @@ Warehouse:
 
 ```powershell
 # Historical backfill (explicit write permission)
-docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run_order_items.py --backfill
+docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run.py --table-name order_items --backfill
 
 # One verified incremental manifest
-docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run_order_items.py --manifest-key silver_incremental/order_items/batch_id=<batch-id>/_BATCH_METADATA.json
+docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run.py --table-name order_items --manifest-key silver_incremental/order_items/batch_id=<batch-id>/_BATCH_METADATA.json
 
 # Read-only reconciliation: rows, business-column hashes, and Order/Product FKs
 docker exec ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/reconcile_order_items.py
