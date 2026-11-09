@@ -1,0 +1,11 @@
+{
+  "isolation": {
+    "nessie_ref": "integration-gold-dimensional",
+    "minio_bucket": "ecommerce-gold-dimensional-it-disposable"
+  },
+  "mode": "DRY_RUN",
+  "dim_date_start": "2026-01-01",
+  "dim_date_end": "2026-01-31",
+  "scenarios": ["global fence blocks concurrent distinct graph identities", "pre-existing Iceberg target schema/property drift blocks before MERGE"],
+  "notes": "Inject an attested Iceberg Silver lineage at runtime. Never use production bucket or main ref."
+}

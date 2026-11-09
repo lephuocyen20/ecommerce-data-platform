@@ -10,9 +10,11 @@ from pyspark.sql.types import LongType, StringType, StructField, StructType
 
 from gold.implementation.dimensional.reconciliation import reconcile_fact_orders
 from gold.implementation.dimensional.transformations import (
+    build_dim_date,
     build_dim_customer,
     build_fact_orders,
 )
+from gold.implementation.dimensional.quality import DimensionalQualityError, validate_table_frame
 
 
 @pytest.fixture(scope="module")
@@ -116,3 +118,11 @@ def test_fact_orders_parity_maps_customer_natural_key():
     report = reconcile_fact_orders(legacy, iceberg)
 
     assert report["status"] == "PASS"
+
+
+def test_dim_date_uses_explicit_inclusive_range_and_quality_rejects_duplicate_grain(spark):
+    dates = build_dim_date(spark, "2026-01-01", "2026-01-02")
+    assert [row.date_key for row in dates.orderBy("date_key").collect()] == [20260101, 20260102]
+    duplicate = dates.unionByName(dates.limit(1))
+    with pytest.raises(DimensionalQualityError, match="Duplicate grain"):
+        validate_table_frame("dim_date", duplicate)
