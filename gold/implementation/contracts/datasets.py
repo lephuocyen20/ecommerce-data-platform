@@ -12,10 +12,12 @@ Business model:
 from gold.lineage import GOLD_DATASET_SOURCES
 
 GOLD_CONTRACT_VERSION = "1.0"
+GOLD_SEMANTIC_CONTRACT_VERSION = "1.0"
 
 
 GOLD_DATASETS = {
     "daily_sales": {
+        "semantic": {"version": GOLD_SEMANTIC_CONTRACT_VERSION, "owner": "analytics", "timezone": "UTC", "business_day": "UTC calendar day", "measures": ["order_count", "gross_merchandise_value", "net_order_value"]},
         "grain": ["order_date"],
         "sources": list(GOLD_DATASET_SOURCES["daily_sales"]),
         "primary_key": ["order_date"],
@@ -32,6 +34,7 @@ GOLD_DATASETS = {
     },
 
     "product_performance": {
+        "semantic": {"version": GOLD_SEMANTIC_CONTRACT_VERSION, "owner": "analytics", "timezone": "UTC", "business_day": "UTC calendar day", "measures": ["order_count", "units_ordered", "net_order_value"]},
         "grain": ["product_id"],
         "sources": list(GOLD_DATASET_SOURCES["product_performance"]),
         "primary_key": ["product_id"],
@@ -49,6 +52,7 @@ GOLD_DATASETS = {
     },
 
     "customer_metrics": {
+        "semantic": {"version": GOLD_SEMANTIC_CONTRACT_VERSION, "owner": "analytics", "timezone": "UTC", "business_day": "UTC calendar day", "measures": ["order_count", "total_order_value", "delivered_order_value"]},
         "grain": ["customer_id"],
         "sources": list(GOLD_DATASET_SOURCES["customer_metrics"]),
         "primary_key": ["customer_id"],
@@ -66,6 +70,7 @@ GOLD_DATASETS = {
     },
 
     "payment_summary": {
+        "semantic": {"version": GOLD_SEMANTIC_CONTRACT_VERSION, "owner": "analytics", "timezone": "UTC", "business_day": "UTC calendar day", "measures": ["payment_count", "distinct_order_count", "total_payment_amount"]},
         "grain": [
             "payment_method",
             "payment_status",
