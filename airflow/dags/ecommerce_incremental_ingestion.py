@@ -13,6 +13,7 @@ if AIRFLOW_PROJECT_PATH not in sys.path:
 from pipeline_contracts import GOLD_DATASET_SOURCES, TABLES
 from pipeline_operators import (create_dbt_build_operator, create_gold_write_operator, create_incremental_silver_operator, create_silver_snapshot_operator, create_lakehouse_migration_operator, create_lakehouse_reconcile_operator, create_lakehouse_warehouse_operator)
 from pipeline_tasks.lakehouse import (check_lakehouse_customers_eligibility, skip_iceberg_customers, verify_iceberg_customers_checkpoint, check_lakehouse_products_eligibility, skip_iceberg_products, verify_iceberg_products_checkpoint, check_lakehouse_orders_eligibility, skip_iceberg_orders, verify_iceberg_orders_checkpoint, check_lakehouse_order_items_eligibility, skip_iceberg_order_items, check_iceberg_order_items_cutover, skip_iceberg_order_items_warehouse, verify_iceberg_order_items_checkpoint, check_lakehouse_payments_eligibility, skip_iceberg_payments, check_iceberg_payments_cutover, skip_iceberg_payments_warehouse, verify_iceberg_payments_checkpoint, check_lakehouse_shipments_eligibility, skip_iceberg_shipments, check_iceberg_shipments_cutover, skip_iceberg_shipments_warehouse, verify_iceberg_shipments_checkpoint)
+from pipeline_gold import link_gold_orchestration
 from pipeline_tasks.gold import (gold_snapshot_gate, prepare_gold_dataset_sources_task, resolve_gold_snapshot_lineage_task, skip_gold_layer)
 from pipeline_tasks.ingestion import ingest_incremental, validate_config, validate_incremental
 from pipeline_tasks.silver import (check_silver_eligibility, pipeline_summary, silver_result, skip_silver, verify_silver_manifest)
@@ -173,21 +174,27 @@ def ecommerce_incremental_ingestion():
     dbt_eligibility_task = check_dbt_eligibility(warehouse_loader_task)
     dbt_eligibility_task >> [dbt_build_task, skip_dbt()]
 
-    gold_gate_task = gold_snapshot_gate(warehouse_loader_task)
+    gold_gate_task = gold_snapshot_gate(pipeline_summary_task)
     gold_skip_task = skip_gold_layer()
     gold_lineage_task = resolve_gold_snapshot_lineage_task()
-    gold_gate_task >> [gold_skip_task, gold_lineage_task]
-    dbt_build_task >> gold_gate_task
     snapshot_tasks = {}
     for table_name in TABLES:
         snapshot_tasks[table_name] = create_snapshot_operator(table_name)
-        gold_lineage_task >> snapshot_tasks[table_name]
+    gold_source_tasks, gold_write_tasks = {}, {}
     for dataset_name in GOLD_DATASET_SOURCES:
         source_task_id = f"gold_sources_{dataset_name}"
-        gold_sources_task = prepare_gold_dataset_sources_task.override(task_id=source_task_id)(dataset_name, gold_lineage_task)
-        for source_table in GOLD_DATASET_SOURCES[dataset_name]:
-            snapshot_tasks[source_table] >> gold_sources_task
-        gold_sources_task >> create_gold_operator(dataset_name, source_task_id)
+        gold_source_tasks[dataset_name] = prepare_gold_dataset_sources_task.override(task_id=source_task_id)(dataset_name, gold_lineage_task)
+        gold_write_tasks[dataset_name] = create_gold_operator(dataset_name, source_task_id)
+
+    link_gold_orchestration(
+        pipeline_summary_task=pipeline_summary_task,
+        gold_gate_task=gold_gate_task,
+        gold_skip_task=gold_skip_task,
+        gold_lineage_task=gold_lineage_task,
+        snapshot_tasks=snapshot_tasks,
+        dataset_source_tasks=gold_source_tasks,
+        gold_write_tasks=gold_write_tasks,
+    )
 
 
 ecommerce_incremental_ingestion()

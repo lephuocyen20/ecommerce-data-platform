@@ -9,6 +9,7 @@ if AIRFLOW_PROJECT_PATH not in sys.path:
     sys.path.insert(0, AIRFLOW_PROJECT_PATH)
 
 from common.runtime_policy import is_feature_enabled
+from gold_gate_policy import decide_gold_snapshot_gate
 from pipeline_gold import (
     build_gold_source_snapshot_payload,
     resolve_silver_snapshot_lineage,
@@ -16,21 +17,18 @@ from pipeline_gold import (
 
 
 @task.branch(retries=0)
-def gold_snapshot_gate(warehouse_result: dict):
-    if not isinstance(warehouse_result, dict):
-        raise ValueError("Missing Warehouse result for Gold gate")
-    if warehouse_result.get("status") != "COMPLETED":
-        return "skip_gold_layer"
-    if not is_feature_enabled("GOLD_SNAPSHOT_WRITE_ENABLED"):
-        return "skip_gold_layer"
-    return "resolve_gold_snapshot_lineage"
+def gold_snapshot_gate(pipeline_result: dict):
+    return decide_gold_snapshot_gate(
+        pipeline_result,
+        write_enabled=is_feature_enabled("GOLD_SNAPSHOT_WRITE_ENABLED"),
+    )
 
 
 @task(retries=0)
 def skip_gold_layer():
     return {
         "status": "SKIPPED",
-        "reason": "GOLD_SNAPSHOT_NOT_ENABLED_OR_UPSTREAM_NOT_COMPLETED",
+        "reason": "GOLD_SNAPSHOT_NOT_ENABLED_OR_SILVER_NOT_WRITABLE",
     }
 
 
