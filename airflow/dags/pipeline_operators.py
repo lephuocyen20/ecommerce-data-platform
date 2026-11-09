@@ -3,7 +3,9 @@
 import os
 
 from airflow.providers.docker.operators.docker import DockerOperator
+from airflow.providers.standard.operators.empty import EmptyOperator
 from docker.types import Mount
+from lakehouse_dependencies import PARENT_COMPLETION_TRIGGER_RULE
 
 
 SPARK_IMAGE = os.environ.get("SPARK_IMAGE", "ecommerce-spark:3.5.6")
@@ -51,7 +53,37 @@ def create_lakehouse_migration_operator(*, table_name, project_path):
 
 
 def create_lakehouse_reconcile_operator(*, table_name, project_path):
-    return create_spark_submit_operator(task_id=f"verify_iceberg_{table_name}", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile.py", arguments=["--table-name", table_name], extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+    manifest_key = "{{ ti.xcom_pull(task_ids='verify_silver_" + table_name + "')['manifest_key'] }}"
+    return create_spark_submit_operator(task_id=f"verify_iceberg_{table_name}", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile.py", arguments=["--table-name", table_name, "--manifest-key", manifest_key], extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+
+
+def create_lakehouse_attestation_operator(*, table_name, project_path):
+    manifest_key = "{{ ti.xcom_pull(task_ids='verify_silver_" + table_name + "')['manifest_key'] }}"
+    return create_spark_submit_operator(task_id=f"attest_iceberg_{table_name}", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/attestation_cli.py", arguments=["--table-name", table_name, "--manifest-key", manifest_key], extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+
+
+def create_lakehouse_quality_operator(*, table_name, project_path):
+    """Run the read-only quality contract; a FAIL/ERROR blocks downstream work."""
+    return create_spark_submit_operator(
+        task_id=f"quality_iceberg_{table_name}",
+        project_path=project_path,
+        script_path=f"{SPARK_WORKDIR}/lakehouse/quality/cli.py",
+        arguments=["--table-name", table_name, "--manifest-key", "{{ ti.xcom_pull(task_ids='verify_silver_" + table_name + "')['manifest_key'] }}"],
+        extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)],
+        retries=0,
+    )
+
+
+def create_lakehouse_completion_operator(*, table_name):
+    """Join an Iceberg parent write and its intentional no-op branch.
+
+    A skipped/no-op parent permits FK children; a failed parent does not.
+    """
+    return EmptyOperator(
+        task_id=f"iceberg_{table_name}_completion",
+        trigger_rule=PARENT_COMPLETION_TRIGGER_RULE,
+        retries=0,
+    )
 
 
 def create_lakehouse_warehouse_operator(*, table_name, project_path):
@@ -114,15 +146,18 @@ def create_silver_snapshot_operator(*, table_name, project_path, database_enviro
     )
 
 
-def create_gold_write_operator(*, dataset_name, source_task_id, project_path):
+def create_gold_write_operator(*, dataset_name, source_task_id, project_path, source_mode="parquet_snapshot"):
     """Create the guarded Gold write task for one Gold dataset."""
+    if source_mode not in {"parquet_snapshot", "iceberg_snapshot"}:
+        raise ValueError("Unsupported Gold source mode")
+    source_argument = "--source-lineage" if source_mode == "iceberg_snapshot" else "--source-snapshots"
     return create_spark_submit_operator(
         task_id=f"gold_{dataset_name}",
         project_path=project_path,
         script_path=f"{SPARK_WORKDIR}/gold/run_pipeline.py",
         arguments=[
             "--dataset", dataset_name,
-            "--source-snapshots",
+            source_argument,
             "{{{{ ti.xcom_pull(task_ids='{}') }}}}".format(source_task_id),
             "--mode", "WRITE",
         ],
@@ -140,6 +175,12 @@ def create_gold_write_operator(*, dataset_name, source_task_id, project_path):
             Mount(
                 source=project_path + r"\ingestion",
                 target=f"{SPARK_WORKDIR}/ingestion",
+                type="bind",
+                read_only=True,
+            ),
+            Mount(
+                source=project_path + r"\lakehouse",
+                target=f"{SPARK_WORKDIR}/lakehouse",
                 type="bind",
                 read_only=True,
             ),

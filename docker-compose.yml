@@ -12,6 +12,8 @@ x-airflow-common: &airflow-common
     AIRFLOW_SIMPLE_AUTH_PASSWORDS_FILE: /opt/airflow/auth/simple_auth_manager_passwords.json
     INGESTION_WRITE_ENABLED: "${INGESTION_WRITE_ENABLED:-false}"
     LAKEHOUSE_WRITE_ENABLED: "${LAKEHOUSE_WRITE_ENABLED:-false}"
+    GOLD_SOURCE_MODE: "${GOLD_SOURCE_MODE:-parquet_snapshot}"
+    GOLD_ICEBERG_SOURCE_LINEAGE: "${GOLD_ICEBERG_SOURCE_LINEAGE:-}"
     WAREHOUSE_WRITE_ENABLED: "${WAREHOUSE_WRITE_ENABLED:-false}"
     CUSTOMERS_SILVER_SOURCE: "${CUSTOMERS_SILVER_SOURCE:-parquet}"
     CUSTOMERS_ICEBERG_CUTOVER_ENABLED: "${CUSTOMERS_ICEBERG_CUTOVER_ENABLED:-false}"
@@ -56,6 +58,7 @@ x-airflow-common: &airflow-common
     - ./common:/opt/airflow/project/common:ro
     - ./silver:/opt/airflow/project/silver:ro
     - ./gold:/opt/airflow/project/gold:ro
+    - ./lakehouse:/opt/airflow/project/lakehouse:ro
     - ./transformation:/opt/airflow/project/transformation:ro
     - ./staging:/opt/airflow/project/staging
 services:
@@ -203,6 +206,7 @@ services:
     - ./common:/opt/airflow/project/common:ro
     - ./silver:/opt/airflow/project/silver:ro
     - ./gold:/opt/airflow/project/gold:ro
+    - ./lakehouse:/opt/airflow/project/lakehouse:ro
     - ./transformation:/opt/airflow/project/transformation:ro
     - /var/run/docker.sock:/var/run/docker.sock
     - ./staging:/opt/airflow/project/staging
@@ -234,6 +238,7 @@ services:
     - ./common:/opt/airflow/project/common:ro
     - ./silver:/opt/airflow/project/silver:ro
     - ./gold:/opt/airflow/project/gold:ro
+    - ./lakehouse:/opt/airflow/project/lakehouse:ro
     - ./transformation:/opt/airflow/project/transformation:ro
     - ./staging:/opt/airflow/project/staging
     depends_on:

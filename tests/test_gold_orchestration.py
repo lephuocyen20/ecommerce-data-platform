@@ -121,3 +121,36 @@ def test_gold_graph_rejects_incomplete_snapshot_wiring():
             dataset_source_tasks={dataset: _Task(dataset) for dataset in graph.GOLD_DATASET_SOURCES},
             gold_write_tasks={dataset: _Task(dataset) for dataset in graph.GOLD_DATASET_SOURCES},
         )
+
+
+def test_iceberg_gold_graph_requires_all_evidence_and_no_warehouse():
+    graph = _dag_module("pipeline_gold")
+    evidence = {table: _Task(f"quality_iceberg_{table}") for table in graph.TABLES}
+    sources = {dataset: _Task(f"gold_sources_{dataset}") for dataset in graph.GOLD_DATASET_SOURCES}
+    writers = {dataset: _Task(f"gold_{dataset}") for dataset in graph.GOLD_DATASET_SOURCES}
+    summary, gate, skip, lineage = _Task("pipeline_summary"), _Task("gold_gate"), _Task("skip"), _Task("resolve_gold_iceberg_lineage")
+    graph.link_gold_iceberg_orchestration(
+        pipeline_summary_task=summary, gold_gate_task=gate, gold_skip_task=skip,
+        gold_lineage_task=lineage, evidence_tasks=evidence,
+        dataset_source_tasks=sources, gold_write_tasks=writers,
+    )
+    assert summary.downstream == [gate]
+    assert lineage in [task for item in evidence.values() for task in item.downstream]
+    assert all("warehouse" not in task.task_id and "dbt" not in task.task_id
+               for task in [summary, gate, skip, lineage, *evidence.values(), *sources.values(), *writers.values()])
+    with pytest.raises(ValueError, match="evidence completion"):
+        graph.link_gold_iceberg_orchestration(
+            pipeline_summary_task=summary, gold_gate_task=gate, gold_skip_task=skip,
+            gold_lineage_task=lineage, evidence_tasks={}, dataset_source_tasks=sources,
+            gold_write_tasks=writers,
+        )
+
+
+def test_gold_iceberg_operator_mounts_lakehouse_and_uses_lineage_payload():
+    source = (Path(__file__).parents[1] / "airflow" / "dags" / "pipeline_operators.py").read_text(encoding="utf-8")
+    start = source.index("def create_gold_write_operator")
+    section = source[start:source.index("def create_spark_submit_operator", start)]
+    assert '"--source-lineage"' in section
+    assert 'source=project_path + r"\\lakehouse"' in section
+    assert 'target=f"{SPARK_WORKDIR}/lakehouse"' in section
+    assert "read_only=True" in section

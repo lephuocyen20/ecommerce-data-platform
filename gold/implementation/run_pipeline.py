@@ -10,7 +10,12 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
 from gold.implementation.contracts.datasets import get_gold_contract
-from gold.implementation.readers import read_gold_sources
+from gold.implementation.readers import read_gold_sources, read_gold_sources_from_lineage
+from gold.implementation.source_lineage import (
+    ICEBERG_SNAPSHOT,
+    parquet_lineage,
+    validate_source_lineage,
+)
 
 from gold.implementation.transformations.daily_sales import (
     build_daily_sales,
@@ -48,7 +53,7 @@ from gold.implementation.fencing import (
     validate_publication_eligibility,
 )
 from gold.implementation.ownership import acquire_gold_ownership
-from gold.implementation.preflight import run_gold_preflight
+from gold.implementation.preflight import run_gold_preflight, run_gold_preflight_from_lineage
 from gold.implementation.storage.manifest import build_gold_manifest
 from gold.implementation.storage.objects import discover_gold_parquet_objects
 from gold.implementation.storage.publisher import publish_gold_snapshot
@@ -88,10 +93,14 @@ def parse_args():
         required=True,
         choices=sorted(DATASET_HANDLERS),
     )
-    parser.add_argument(
+    source_group = parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument(
         "--source-snapshots",
-        required=True,
         help="JSON mapping table_name to published Silver snapshot ID",
+    )
+    source_group.add_argument(
+        "--source-lineage",
+        help="JSON v2 source lineage envelope (required for Iceberg mode)",
     )
     parser.add_argument(
         "--mode",
@@ -129,6 +138,15 @@ def validate_snapshot_config(dataset_name, raw_json):
     return snapshots
 
 
+def validate_source_lineage_config(dataset_name, raw_json):
+    try:
+        lineage = json.loads(raw_json)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("source-lineage must be valid JSON") from exc
+    validate_source_lineage(lineage, dataset_name)
+    return lineage
+
+
 def _write_gold_snapshot(
     spark,
     client,
@@ -137,15 +155,21 @@ def _write_gold_snapshot(
     snapshots,
     gold_df,
     row_count,
+    source_lineage=None,
 ):
     """Write, verify, and publish an immutable Gold snapshot."""
-    preflight = run_gold_preflight(
+    preflight_fn = run_gold_preflight_from_lineage if source_lineage is not None else run_gold_preflight
+    preflight_args = dict(
         spark=spark,
         client=client,
         bucket=bucket,
         dataset_name=dataset_name,
-        source_snapshots=snapshots,
     )
+    if source_lineage is None:
+        preflight_args["source_snapshots"] = snapshots
+    else:
+        preflight_args["source_lineage"] = source_lineage
+    preflight = preflight_fn(**preflight_args)
 
     if preflight["status"] == "VERIFIED_EXISTING":
         return {
@@ -180,13 +204,7 @@ def _write_gold_snapshot(
         )
 
         # Kiểm tra lại trạng thái khi đang giữ execution lock.
-        preflight = run_gold_preflight(
-            spark=spark,
-            client=client,
-            bucket=bucket,
-            dataset_name=dataset_name,
-            source_snapshots=snapshots,
-        )
+        preflight = preflight_fn(**preflight_args)
 
         if preflight["status"] == "VERIFIED_EXISTING":
             return {
@@ -234,6 +252,7 @@ def _write_gold_snapshot(
             row_count=row_count,
             schema=contract["columns"],
             parquet_objects=parquet_objects,
+            source_lineage=source_lineage,
         )
 
         ownership.assert_alive()
@@ -280,6 +299,7 @@ def run_dataset(
     bucket,
     dataset_name,
     snapshots,
+    source_lineage=None,
     mode=DRY_RUN,
 ):
     if mode not in {DRY_RUN, WRITE}:
@@ -289,16 +309,17 @@ def run_dataset(
 
     contract = get_gold_contract(dataset_name)
 
-    sources = read_gold_sources(
-        spark=spark,
-        client=client,
-        bucket=bucket,
-        dataset_name=dataset_name,
-        snapshot_ids=snapshots,
+    if source_lineage is None:
+        source_lineage = parquet_lineage(snapshots, dataset_name)
+    validate_source_lineage(source_lineage, dataset_name)
+    sources = read_gold_sources_from_lineage(
+        spark=spark, client=client, bucket=bucket,
+        dataset_name=dataset_name, lineage=source_lineage,
     )
 
     for table_name in contract["sources"]:
-        if sources[table_name]["snapshot_id"] != snapshots[table_name]:
+        expected_snapshot = source_lineage["sources"][table_name]["snapshot_id"]
+        if sources[table_name]["snapshot_id"] != expected_snapshot:
             raise RuntimeError(
                 f"Silver lineage mismatch: {table_name}"
             )
@@ -342,6 +363,7 @@ def run_dataset(
             "mode": mode,
             "dataset_name": dataset_name,
             "source_snapshots": snapshots,
+            "source_lineage": source_lineage,
             "row_count": row_count,
             "grain_count": grain_count,
             "source_quality": "PASS",
@@ -374,6 +396,7 @@ def run_dataset(
                     snapshots=snapshots,
                     gold_df=gold_df,
                     row_count=row_count,
+                    source_lineage=(source_lineage if source_lineage["source_type"] == ICEBERG_SNAPSHOT else None),
                 )
             )
 
@@ -386,10 +409,15 @@ def run_dataset(
 def main():
     args = parse_args()
 
-    snapshots = validate_snapshot_config(
-        args.dataset,
-        args.source_snapshots,
-    )
+    if args.source_lineage is not None:
+        source_lineage = validate_source_lineage_config(args.dataset, args.source_lineage)
+        snapshots = {
+            table: source["snapshot_id"]
+            for table, source in source_lineage["sources"].items()
+        }
+    else:
+        snapshots = validate_snapshot_config(args.dataset, args.source_snapshots)
+        source_lineage = parquet_lineage(snapshots, args.dataset)
 
     spark = None
 
@@ -412,6 +440,7 @@ def main():
             bucket=os.environ["BRONZE_BUCKET"],
             dataset_name=args.dataset,
             snapshots=snapshots,
+            source_lineage=source_lineage,
             mode=args.mode,
         )
 

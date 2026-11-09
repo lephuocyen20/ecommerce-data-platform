@@ -1,7 +1,7 @@
 """Dependency-free policy for deciding whether a Gold snapshot may run."""
 
 
-def decide_gold_snapshot_gate(pipeline_result: dict, *, write_enabled: bool):
+def decide_gold_snapshot_gate(pipeline_result: dict, *, write_enabled: bool, lineage_task_id="resolve_gold_snapshot_lineage"):
     """Require a verified Silver summary before starting the Gold snapshot flow."""
     if not isinstance(pipeline_result, dict):
         raise ValueError("Missing Silver pipeline summary for Gold gate")
@@ -13,4 +13,6 @@ def decide_gold_snapshot_gate(pipeline_result: dict, *, write_enabled: bool):
         raise ValueError("Gold requires verified Silver result details")
     if pipeline_result["mode"] != "WRITE" or not write_enabled:
         return "skip_gold_layer"
-    return "resolve_gold_snapshot_lineage"
+    if lineage_task_id not in {"resolve_gold_snapshot_lineage", "resolve_gold_iceberg_lineage"}:
+        raise ValueError("Invalid Gold lineage branch target")
+    return lineage_task_id

@@ -3,7 +3,9 @@
 
 from gold.implementation.identity import (
     build_gold_snapshot_id,
+    build_gold_snapshot_id_from_lineage,
 )
+from gold.implementation.storage.publisher import read_published_manifest
 from gold.implementation.storage.lineage import (
     discover_gold_lineage,
 )
@@ -20,6 +22,28 @@ from gold.implementation.version_policy import (
 
 class GoldPreflightError(RuntimeError):
     pass
+
+
+def run_gold_preflight_from_lineage(spark, client, bucket, dataset_name, source_lineage):
+    """Fail-closed v2 preflight without coercing Iceberg IDs into v1 lineage."""
+    deterministic_id = build_gold_snapshot_id_from_lineage(dataset_name, source_lineage)
+    target = inspect_gold_snapshot(client, bucket, dataset_name, deterministic_id)
+    result = {"dataset_name": dataset_name, "deterministic_snapshot_id": deterministic_id,
+              "target_state": target["state"], "can_write": False, "can_publish": False}
+    if target["state"] == "NOT_FOUND":
+        return {**result, "status": "CANDIDATE", "action": "NEW_SNAPSHOT_CANDIDATE", "reason": "NEW_V2_LINEAGE"}
+    if target["state"] == "UNPUBLISHED":
+        return {**result, "status": "CANDIDATE", "action": "REQUIRES_RECOVERY", "reason": "UNPUBLISHED_V2_LINEAGE"}
+    if target["state"] != "PUBLISHED":
+        return {**result, "status": "BLOCKED", "action": "BLOCKED", "reason": "INVALID_V2_TARGET_STATE"}
+    manifest = read_published_manifest(client, bucket, target["manifest_key"])
+    if manifest.get("manifest_version") != "2.0" or manifest.get("source_lineage") != source_lineage:
+        return {**result, "status": "BLOCKED", "action": "BLOCKED", "reason": "V2_LINEAGE_CONFLICT"}
+    verification = execute_gold_recovery(spark, client, bucket, dataset_name, deterministic_id, expected_manifest=manifest)
+    if verification["status"] not in {"VERIFIED", "ALREADY_PUBLISHED"}:
+        raise GoldPreflightError("Unable to verify existing v2 Gold snapshot")
+    return {**result, "status": "VERIFIED_EXISTING", "action": "VERIFY_EXISTING",
+            "selected_snapshot_id": deterministic_id, "reason": "V2_LINEAGE_VERIFIED"}
 
 
 def run_gold_preflight(
