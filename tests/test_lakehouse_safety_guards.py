@@ -194,6 +194,10 @@ def test_spark_factory_uses_bounded_retry_and_timeout(monkeypatch):
     assert task.kwargs["retry_exponential_backoff"] is True
     assert task.kwargs["execution_timeout"].total_seconds() == 7200
     assert task.kwargs["timeout"] == 60
+    assert task.kwargs["private_environment"]["PYTHONPATH"] == (
+        "/opt/spark/work-dir:/opt/spark/python:"
+        "/opt/spark/python/lib/py4j-0.10.9.7-src.zip"
+    )
 
 
 def test_dbt_factory_explicitly_keeps_single_attempt_policy():

@@ -1,10 +1,12 @@
 """Spark regression tests for the first dimensional Gold slice."""
 
 import pytest
+from decimal import Decimal
 
 
-pyspark = pytest.importorskip("pyspark")
+import pyspark
 from pyspark.sql import SparkSession
+from pyspark.sql.types import LongType, StringType, StructField, StructType
 
 from gold.implementation.dimensional.reconciliation import reconcile_fact_orders
 from gold.implementation.dimensional.transformations import (
@@ -43,6 +45,29 @@ def test_dim_customer_uses_latest_version_and_typed_unknown_member(spark):
     assert result[1].full_name == "New name"
 
 
+def test_dim_customer_unknown_member_handles_non_nullable_and_empty_sources(spark):
+    schema = StructType([
+        StructField("customer_id", LongType(), nullable=False),
+        StructField("full_name", StringType(), nullable=False),
+        StructField("email", StringType(), nullable=False),
+        StructField("created_at", StringType(), nullable=False),
+        StructField("updated_at", StringType(), nullable=False),
+    ])
+    result = build_dim_customer(spark.createDataFrame([], schema)).collect()
+    assert len(result) == 1
+    assert result[0].customer_key == -1
+    assert result[0].customer_id is None
+
+
+def test_dim_customer_rejects_reserved_unknown_natural_key(spark):
+    customers = spark.createDataFrame(
+        [(-1, "Reserved", "reserved@example.com", "2026-01-01", "2026-01-01")],
+        "customer_id long, full_name string, email string, created_at string, updated_at string",
+    )
+    with pytest.raises(ValueError, match="reserves -1"):
+        build_dim_customer(customers)
+
+
 def test_fact_orders_aggregates_items_without_fanout_and_maps_unknown_customer(spark):
     orders = spark.createDataFrame(
         [(10, 1, "2026-02-01", "paid"), (11, 999, "2026-02-01", "new")],
@@ -50,8 +75,8 @@ def test_fact_orders_aggregates_items_without_fanout_and_maps_unknown_customer(s
     )
     items = spark.createDataFrame(
         [
-            (100, 10, 2, 10.00, 1.50),
-            (101, 10, 1, 5.00, 0.00),
+            (100, 10, 2, Decimal("10.00"), Decimal("1.50")),
+            (101, 10, 1, Decimal("5.00"), Decimal("0.00")),
         ],
         "order_item_id long, order_id long, quantity long, unit_price decimal(10,2), discount_amount decimal(10,2)",
     )

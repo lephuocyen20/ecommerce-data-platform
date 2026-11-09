@@ -38,11 +38,10 @@ def _canonical(row, columns):
     return json.dumps({name: _normalise(row[name], data_type) for name, data_type in columns.items()}, sort_keys=True, separators=(",", ":"))
 
 
-def reconcile_gold_rows(dataset_name, legacy_rows, iceberg_rows, *, numeric_tolerance=Decimal("0")):
-    """Compare two materialized Gold result sets at the declared business grain."""
+def reconcile_rows(dataset_name, legacy_rows, iceberg_rows, contract, *, numeric_tolerance=Decimal("0")):
+    """Compare materialized rows against an explicit semantic contract."""
     if not isinstance(numeric_tolerance, Decimal) or numeric_tolerance < 0:
         raise ValueError("numeric_tolerance must be a non-negative Decimal")
-    contract = get_gold_contract(dataset_name)
     keys, columns = contract["primary_key"], contract["columns"]
 
     def index(rows, label):
@@ -75,6 +74,17 @@ def reconcile_gold_rows(dataset_name, legacy_rows, iceberg_rows, *, numeric_tole
     report = {"dataset_name": dataset_name, "contract_version": contract["semantic"]["version"], "legacy_row_count": len(legacy), "iceberg_row_count": len(iceberg), "missing_keys": missing, "extra_keys": extra, "differences": differences, "legacy_hash": digest(legacy.values()), "iceberg_hash": digest(iceberg.values())}
     report["status"] = "PASS" if not missing and not extra and not differences and report["legacy_hash"] == report["iceberg_hash"] else "FAIL"
     return report
+
+
+def reconcile_gold_rows(dataset_name, legacy_rows, iceberg_rows, *, numeric_tolerance=Decimal("0")):
+    """Compare two materialized Gold result sets at the declared business grain."""
+    return reconcile_rows(
+        dataset_name,
+        legacy_rows,
+        iceberg_rows,
+        get_gold_contract(dataset_name),
+        numeric_tolerance=numeric_tolerance,
+    )
 
 
 def require_semantic_parity(*args, **kwargs):

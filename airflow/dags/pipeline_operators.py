@@ -17,6 +17,13 @@ DOCKER_NETWORK = os.environ.get(
     "AIRFLOW_DOCKER_NETWORK", "ecommerce-data-platform_default"
 )
 SPARK_WORKDIR = "/opt/spark/work-dir"
+SPARK_PYTHONPATH = ":".join(
+    (
+        SPARK_WORKDIR,
+        "/opt/spark/python",
+        "/opt/spark/python/lib/py4j-0.10.9.7-src.zip",
+    )
+)
 TRANSFORMATION_TARGET = f"{SPARK_WORKDIR}/transformation"
 IDEMPOTENT_RETRIES = 2
 IDEMPOTENT_RETRY_DELAY = timedelta(minutes=1)
@@ -214,7 +221,7 @@ def create_spark_submit_operator(
         "MINIO_ACCESS_KEY": os.environ["MINIO_ACCESS_KEY"],
         "MINIO_SECRET_KEY": os.environ["MINIO_SECRET_KEY"],
         "BRONZE_BUCKET": os.environ["BRONZE_BUCKET"],
-        "PYTHONPATH": SPARK_WORKDIR,
+        "PYTHONPATH": SPARK_PYTHONPATH,
     }
     environment.update(extra_environment or {})
 

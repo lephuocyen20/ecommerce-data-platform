@@ -1,6 +1,7 @@
 """Pure Spark transformations for Type-1 dimensions and order-grain fact."""
 from pyspark.sql import functions as F
 from pyspark.sql import Window
+from pyspark.sql.types import StructField, StructType
 from .contracts import UNKNOWN_KEY
 
 def build_dim_date(spark, start_date, end_date):
@@ -9,14 +10,19 @@ def build_dim_date(spark, start_date, end_date):
 
 def _type1(source, natural_key, key_name, attributes, updated_at="updated_at"):
     columns = [natural_key, *attributes]
+    if source.where(F.col(natural_key).cast("string") == F.lit(str(UNKNOWN_KEY))).limit(1).count():
+        raise ValueError(f"{natural_key} reserves {UNKNOWN_KEY} for the unknown member")
     # Latest source version wins; ties have a stable full-row hash tie-breaker.
     ordering = [F.col(updated_at).desc_nulls_last(), F.sha2(F.concat_ws("|", *[F.coalesce(F.col(c).cast("string"), F.lit("<null>")) for c in columns]), 256).desc()]
     base = source.select(*[F.col(c) for c in columns]).withColumn("_rn", F.row_number().over(Window.partitionBy(natural_key).orderBy(*ordering))).where("_rn = 1").drop("_rn")
     rows = base.withColumn(key_name, F.col(natural_key).cast("long"))
-    unknown = rows.limit(0)
-    for name in [key_name, natural_key, *attributes]:
-        value = F.lit(UNKNOWN_KEY) if name == key_name else F.lit(None).cast(rows.schema[name].dataType)
-        unknown = unknown.withColumn(name, value)
+    unknown_schema = StructType(
+        [StructField(field.name, field.dataType, nullable=True) for field in rows.schema]
+    )
+    unknown = source.sparkSession.createDataFrame(
+        [tuple(UNKNOWN_KEY if field.name == key_name else None for field in rows.schema)],
+        unknown_schema,
+    )
     return rows.select(key_name, natural_key, *attributes).unionByName(unknown)
 
 def build_dim_customer(customers): return _type1(customers, "customer_id", "customer_key", ("full_name", "email", "created_at", "updated_at"))
