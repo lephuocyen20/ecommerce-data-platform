@@ -1,6 +1,7 @@
 """Reusable Airflow DockerOperator factories for Spark pipeline stages."""
 
 import os
+from datetime import timedelta
 
 from airflow.providers.docker.operators.docker import DockerOperator
 from airflow.providers.standard.operators.empty import EmptyOperator
@@ -17,6 +18,10 @@ DOCKER_NETWORK = os.environ.get(
 )
 SPARK_WORKDIR = "/opt/spark/work-dir"
 TRANSFORMATION_TARGET = f"{SPARK_WORKDIR}/transformation"
+IDEMPOTENT_RETRIES = 2
+IDEMPOTENT_RETRY_DELAY = timedelta(minutes=1)
+IDEMPOTENT_EXECUTION_TIMEOUT = timedelta(hours=2)
+DOCKER_API_TIMEOUT_SECONDS = 60
 
 
 def create_incremental_silver_operator(*, table_name, project_path):
@@ -49,17 +54,17 @@ def create_incremental_silver_operator(*, table_name, project_path):
 def create_lakehouse_migration_operator(*, table_name, project_path):
     """Generic verified-Parquet to Iceberg task; table behavior lives in TableSpec."""
     manifest_key = "{{ ti.xcom_pull(task_ids='verify_silver_" + table_name + "')['manifest_key'] }}"
-    return create_spark_submit_operator(task_id=f"silver_parquet_to_iceberg_{table_name}", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/run.py", arguments=["--table-name", table_name, "--manifest-key", manifest_key], extra_environment={"LAKEHOUSE_WRITE_ENABLED": os.environ.get("LAKEHOUSE_WRITE_ENABLED", "false")}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+    return create_spark_submit_operator(task_id=f"silver_parquet_to_iceberg_{table_name}", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/run.py", arguments=["--table-name", table_name, "--manifest-key", manifest_key], extra_environment={"LAKEHOUSE_WRITE_ENABLED": os.environ.get("LAKEHOUSE_WRITE_ENABLED", "false")}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)])
 
 
 def create_lakehouse_reconcile_operator(*, table_name, project_path):
     manifest_key = "{{ ti.xcom_pull(task_ids='verify_silver_" + table_name + "')['manifest_key'] }}"
-    return create_spark_submit_operator(task_id=f"verify_iceberg_{table_name}", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile.py", arguments=["--table-name", table_name, "--manifest-key", manifest_key], extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+    return create_spark_submit_operator(task_id=f"verify_iceberg_{table_name}", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile.py", arguments=["--table-name", table_name, "--manifest-key", manifest_key], extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)])
 
 
 def create_lakehouse_attestation_operator(*, table_name, project_path):
     manifest_key = "{{ ti.xcom_pull(task_ids='verify_silver_" + table_name + "')['manifest_key'] }}"
-    return create_spark_submit_operator(task_id=f"attest_iceberg_{table_name}", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/attestation_cli.py", arguments=["--table-name", table_name, "--manifest-key", manifest_key], extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], retries=0)
+    return create_spark_submit_operator(task_id=f"attest_iceberg_{table_name}", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/attestation_cli.py", arguments=["--table-name", table_name, "--manifest-key", manifest_key], extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)])
 
 
 def create_lakehouse_quality_operator(*, table_name, project_path):
@@ -70,7 +75,6 @@ def create_lakehouse_quality_operator(*, table_name, project_path):
         script_path=f"{SPARK_WORKDIR}/lakehouse/quality/cli.py",
         arguments=["--table-name", table_name, "--manifest-key", "{{ ti.xcom_pull(task_ids='verify_silver_" + table_name + "')['manifest_key'] }}"],
         extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)],
-        retries=0,
     )
 
 
@@ -88,7 +92,7 @@ def create_lakehouse_completion_operator(*, table_name):
 
 def create_lakehouse_warehouse_operator(*, table_name, project_path):
     batch_id = "{{ ti.xcom_pull(task_ids='validate_" + table_name + "')['batch_id'] }}"
-    return create_spark_submit_operator(task_id=f"iceberg_{table_name}_to_warehouse", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/warehouse/load.py", arguments=["--table-name", table_name, "--batch-id", batch_id], extra_environment={"WAREHOUSE_DB_HOST": "postgres", "WAREHOUSE_DB_PORT": os.environ["DB_PORT"], "WAREHOUSE_DB_NAME": os.environ["DB_NAME"], "WAREHOUSE_DB_USER": os.environ["DB_USER"], "WAREHOUSE_DB_PASSWORD": os.environ["DB_PASSWORD"]}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True), Mount(source=project_path + r"\warehouse", target=f"{SPARK_WORKDIR}/warehouse", type="bind", read_only=True)], retries=0)
+    return create_spark_submit_operator(task_id=f"iceberg_{table_name}_to_warehouse", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/warehouse/load.py", arguments=["--table-name", table_name, "--batch-id", batch_id], extra_environment={"WAREHOUSE_DB_HOST": "postgres", "WAREHOUSE_DB_PORT": os.environ["DB_PORT"], "WAREHOUSE_DB_NAME": os.environ["DB_NAME"], "WAREHOUSE_DB_USER": os.environ["DB_USER"], "WAREHOUSE_DB_PASSWORD": os.environ["DB_PASSWORD"]}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True), Mount(source=project_path + r"\warehouse", target=f"{SPARK_WORKDIR}/warehouse", type="bind", read_only=True)])
 
 
 def create_dbt_build_operator(*, project_path):
@@ -122,6 +126,8 @@ def create_dbt_build_operator(*, project_path):
         working_dir="/app",
         mount_tmp_dir=False,
         do_xcom_push=False,
+        # dbt may execute user-defined macros/hooks; retain single-attempt
+        # behavior until its idempotency contract is explicitly proven.
         retries=0,
     )
 
@@ -142,7 +148,6 @@ def create_silver_snapshot_operator(*, table_name, project_path, database_enviro
                 read_only=True,
             ),
         ],
-        retries=0,
     )
 
 
@@ -185,7 +190,6 @@ def create_gold_write_operator(*, dataset_name, source_task_id, project_path, so
                 read_only=True,
             ),
         ],
-        retries=0,
     )
 
 
@@ -198,7 +202,7 @@ def create_spark_submit_operator(
     arguments=(),
     extra_environment=None,
     extra_mounts=(),
-    retries=0,
+    retries=IDEMPOTENT_RETRIES,
 ):
     """Create a consistently configured Spark DockerOperator.
 
@@ -266,4 +270,9 @@ def create_spark_submit_operator(
         mount_tmp_dir=False,
         do_xcom_push=False,
         retries=retries,
+        retry_delay=IDEMPOTENT_RETRY_DELAY,
+        retry_exponential_backoff=True,
+        max_retry_delay=timedelta(minutes=10),
+        execution_timeout=IDEMPOTENT_EXECUTION_TIMEOUT,
+        timeout=DOCKER_API_TIMEOUT_SECONDS,
     )

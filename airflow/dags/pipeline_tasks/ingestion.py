@@ -4,7 +4,6 @@ import logging
 import sys
 from datetime import datetime
 
-from airflow.exceptions import AirflowSkipException
 from airflow.sdk import get_current_context, task
 
 AIRFLOW_PROJECT_PATH = "/opt/airflow/project"
@@ -59,10 +58,43 @@ def build_ingestion_summary(table_name, result):
     })
 
 
+def build_unselected_ingestion_result(table_name, mode):
+    """Represent an intentionally omitted table without an Airflow skip state."""
+    return {
+        "table_name": table_name,
+        "mode": mode,
+        "action": "TABLE_NOT_SELECTED",
+        "status": "NO_DATA",
+        "batch_id": None,
+        "row_count": 0,
+        "persisted": None,
+        "watermark": None,
+        "recoverable_batches": [],
+    }
+
+
+def validate_unselected_ingestion_result(table_name, ingestion_result):
+    """Map a no-op to the existing Silver-compatible skip contract."""
+    if ingestion_result.get("action") != "TABLE_NOT_SELECTED":
+        return None
+    if ingestion_result.get("status") != "NO_DATA" or ingestion_result.get("batch_id") is not None:
+        raise ValueError(f"Invalid unselected ingestion result: {table_name}")
+    mode = ingestion_result.get("mode")
+    if mode == DRY_RUN:
+        return {"table_name": table_name, "mode": mode, "status": "SKIPPED", "reason": "DRY_RUN"}
+    if mode == WRITE:
+        return {"table_name": table_name, "mode": mode, "status": "SKIPPED", "reason": "NO_DATA"}
+    raise ValueError(f"Unexpected unselected ingestion mode: {mode}")
+
+
 @task
 def ingest_incremental(table_name: str, config: dict):
     if table_name not in config["tables"]:
-        raise AirflowSkipException(f"Table {table_name} was not selected")
+        # Return a successful no-op instead of skipping the TaskFlow task.  FK
+        # completion gates must distinguish an intentional unselected parent
+        # from a failed parent so a selected child can use existing Iceberg
+        # parent state.
+        return build_unselected_ingestion_result(table_name, config["mode"])
     project_path = "/opt/airflow/project"
     if project_path not in sys.path:
         sys.path.insert(0, project_path)
@@ -96,6 +128,9 @@ def validate_incremental(table_name: str, ingestion_result: dict):
         raise ValueError(f"Missing ingestion result for {table_name}")
     if ingestion_result.get("table_name") != table_name:
         raise ValueError(f"Ingestion result table mismatch: {table_name}")
+    unselected = validate_unselected_ingestion_result(table_name, ingestion_result)
+    if unselected is not None:
+        return unselected
     mode, status, batch_id = (
         ingestion_result.get("mode"), ingestion_result.get("status"), ingestion_result.get("batch_id")
     )
