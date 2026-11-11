@@ -1,4 +1,4 @@
-"""Strict, Iceberg-only Silver lineage for the dimensional Gold graph."""
+"""Strict Silver source lineage for the dimensional Gold graph."""
 
 import hashlib
 import json
@@ -8,6 +8,7 @@ from .contracts import DIMENSIONAL_SOURCE_TABLES
 from lakehouse.attestation import verify_snapshot_attestation
 
 ICEBERG_SNAPSHOT = "iceberg_snapshot"
+PARQUET_MANIFEST = "parquet_manifest"
 LINEAGE_VERSION = 1
 SOURCE_CONTRACT_VERSION = 1
 DEFAULT_LATE_DATA_POLICY = {"mode": "overlap_reprocess", "overlap_days": 2, "watermark": "updated_at"}
@@ -74,13 +75,16 @@ def _evidence(value, field, source):
 def validate_dimensional_lineage(lineage, scope=None):
     if not isinstance(lineage, dict) or not {"version", "source_type", "sources"} <= set(lineage) or set(lineage) - {"version", "source_type", "sources", "source_contract"}:
         raise DimensionalLineageError("Invalid dimensional lineage envelope")
-    if lineage["version"] != LINEAGE_VERSION or lineage["source_type"] != ICEBERG_SNAPSHOT:
-        raise DimensionalLineageError("Dimensional Gold requires Iceberg snapshot lineage")
+    if lineage["version"] != LINEAGE_VERSION or lineage["source_type"] not in {ICEBERG_SNAPSHOT, PARQUET_MANIFEST}:
+        raise DimensionalLineageError("Dimensional Gold requires verified Silver lineage")
     if not isinstance(lineage["sources"], dict) or set(lineage["sources"]) != set(DIMENSIONAL_SOURCE_TABLES):
         raise DimensionalLineageError("Dimensional source set does not match graph contract")
     fields = {"source_type", "table", "catalog", "namespace", "ref", "snapshot_id", "snapshot_attestation_identity", "reconciliation_evidence", "quality_evidence"}
     for table in DIMENSIONAL_SOURCE_TABLES:
         source = lineage["sources"][table]
+        if lineage["source_type"] == PARQUET_MANIFEST:
+            _validate_parquet_source(source, table, scope=scope)
+            continue
         if not isinstance(source, dict) or not fields <= set(source) or set(source) - fields - {"schema_fingerprint", "delete_count", "reprocess_required", "bronze_batch_id", "row_count"}:
             raise DimensionalLineageError(f"Unexpected lineage fields for {table}")
         if "delete_count" in source and (not isinstance(source["delete_count"], int) or source["delete_count"] < 0):
@@ -113,6 +117,46 @@ def validate_dimensional_lineage(lineage, scope=None):
     return True
 
 
+def _validate_parquet_source(source, table, *, scope=None):
+    """Validate an immutable Silver completion manifest reference."""
+    fields = {"source_type", "table", "bucket", "manifest_key", "data_prefix", "manifest_identity", "batch_id", "row_count", "manifest_keys", "manifest_identities", "data_prefixes"}
+    if not isinstance(source, dict) or not fields <= set(source) or set(source) - fields - {"bronze_batch_id"}:
+        raise DimensionalLineageError(f"Invalid Parquet lineage fields for {table}")
+    if source["source_type"] != PARQUET_MANIFEST or source["table"] != table:
+        raise DimensionalLineageError(f"Parquet source type/table mismatch for {table}")
+    if not isinstance(source["bucket"], str) or not source["bucket"]:
+        raise DimensionalLineageError(f"Invalid Parquet bucket for {table}")
+    if not isinstance(source["manifest_key"], str) or not source["manifest_key"]:
+        raise DimensionalLineageError(f"Invalid Parquet manifest_key for {table}")
+    if not isinstance(source["data_prefix"], str) or not source["data_prefix"].endswith("/"):
+        raise DimensionalLineageError(f"Invalid Parquet data_prefix for {table}")
+    if not isinstance(source["manifest_identity"], str) or not _SHA256.fullmatch(source["manifest_identity"]):
+        raise DimensionalLineageError(f"Invalid Parquet manifest identity for {table}")
+    if not isinstance(source["batch_id"], str) or not re.fullmatch(r"[0-9a-f]{32}", source["batch_id"]):
+        raise DimensionalLineageError(f"Invalid Parquet batch ID for {table}")
+    if not isinstance(source["row_count"], int) or source["row_count"] < 0:
+        raise DimensionalLineageError(f"Invalid Parquet row count for {table}")
+    for name in ("manifest_keys", "manifest_identities", "data_prefixes"):
+        if not isinstance(source[name], list) or not source[name]:
+            raise DimensionalLineageError(f"Invalid Parquet {name} for {table}")
+    if not (len(source["manifest_keys"]) == len(source["manifest_identities"]) == len(source["data_prefixes"])):
+        raise DimensionalLineageError(f"Parquet manifest reference lengths differ for {table}")
+    if source["manifest_key"] not in source["manifest_keys"] or source["data_prefix"] not in source["data_prefixes"] or source["manifest_identity"] not in source["manifest_identities"]:
+        raise DimensionalLineageError(f"Parquet current manifest is not in the source set for {table}")
+    if any(not isinstance(item, str) or not item for item in source["manifest_keys"]):
+        raise DimensionalLineageError(f"Invalid Parquet manifest key list for {table}")
+    if any(not isinstance(item, str) or not item.endswith("/") for item in source["data_prefixes"]):
+        raise DimensionalLineageError(f"Invalid Parquet data prefix list for {table}")
+    if any(not isinstance(item, str) or not _SHA256.fullmatch(item) for item in source["manifest_identities"]):
+        raise DimensionalLineageError(f"Invalid Parquet manifest identity list for {table}")
+    if scope is not None:
+        expected = scope.prefix
+        if source["bucket"] != scope.bucket:
+            raise DimensionalLineageError("Parquet lineage is outside the requested E2E scope")
+        if any(not item.startswith(expected) for item in source["manifest_keys"] + source["data_prefixes"]):
+            raise DimensionalLineageError("Parquet lineage is outside the requested E2E scope")
+
+
 def canonical_dimensional_lineage(lineage, *, scope=None):
     validate_dimensional_lineage(lineage, scope=scope)
     return json.dumps(lineage, sort_keys=True, separators=(",", ":"))
@@ -123,7 +167,7 @@ def dimensional_lineage_identity(lineage, *, scope=None):
 
 
 def build_dimensional_lineage_from_artifacts(artifacts, *, scope=None):
-    """Build lineage only from six verified Silver Iceberg artifact envelopes."""
+    """Build lineage from six verified Silver artifacts."""
     if not isinstance(artifacts, dict) or set(artifacts) != set(DIMENSIONAL_SOURCE_TABLES):
         raise DimensionalLineageError("Dimensional Gold requires six Silver artifact envelopes")
     sources = {}
@@ -131,13 +175,36 @@ def build_dimensional_lineage_from_artifacts(artifacts, *, scope=None):
         artifact = artifacts[table]
         if not isinstance(artifact, dict) or artifact.get("status") != "PASS":
             raise DimensionalLineageError(f"Silver artifact verification failed: {table}")
-        lineage = artifact.get("iceberg_lineage")
+        lineage = artifact.get("parquet_lineage") or artifact.get("iceberg_lineage")
         if not isinstance(lineage, dict):
-            raise DimensionalLineageError(f"Missing migrated Iceberg lineage artifact: {table}")
+            raise DimensionalLineageError(f"Missing verified Silver lineage artifact: {table}")
         sources[table] = lineage
-    envelope = {"version": LINEAGE_VERSION, "source_type": ICEBERG_SNAPSHOT, "sources": sources}
+    source_type = "parquet_manifest" if all(item.get("source_type") == PARQUET_MANIFEST for item in sources.values()) else ICEBERG_SNAPSHOT
+    envelope = {"version": LINEAGE_VERSION, "source_type": source_type, "sources": sources}
     validate_dimensional_lineage(envelope, scope=scope)
     return envelope
+
+
+def build_parquet_lineage_artifact(*, table, bucket, manifest_key, data_prefix, manifest_identity, batch_id, row_count, bronze_batch_id=None, manifest_keys=None, manifest_identities=None, data_prefixes=None):
+    manifest_keys = list(manifest_keys or [manifest_key])
+    manifest_identities = list(manifest_identities or [manifest_identity])
+    data_prefixes = list(data_prefixes or [data_prefix])
+    source = {
+        "source_type": PARQUET_MANIFEST,
+        "table": table,
+        "bucket": bucket,
+        "manifest_key": manifest_key,
+        "data_prefix": data_prefix,
+        "manifest_identity": manifest_identity,
+        "batch_id": batch_id,
+        "row_count": row_count,
+        "manifest_keys": manifest_keys,
+        "manifest_identities": manifest_identities,
+        "data_prefixes": data_prefixes,
+    }
+    if bronze_batch_id is not None:
+        source["bronze_batch_id"] = bronze_batch_id
+    return {"status": "PASS", "parquet_lineage": source}
 
 
 def normalize_dimensional_artifact(table, attestation, reconciliation, quality, *, bronze_batch_id=None, row_count=None):

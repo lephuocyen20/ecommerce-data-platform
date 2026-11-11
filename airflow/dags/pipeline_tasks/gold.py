@@ -1,7 +1,7 @@
 """TaskFlow tasks for the native dimensional Gold Iceberg graph."""
 
 import json
-import logging
+import hashlib
 import os
 import sys
 
@@ -22,6 +22,7 @@ from common.bounded_e2e_scope import TEST_BUCKET, build_bounded_e2e_scope
 from common.minio import create_minio_client
 from common.runtime_policy import is_feature_enabled
 from gold_gate_policy import decide_gold_dimensional_gate
+from gold.implementation.dimensional.lineage import build_parquet_lineage_artifact
 
 
 @task.branch(retries=0)
@@ -39,37 +40,56 @@ def skip_gold_dimensional():
 
 
 @task(retries=0)
-def build_dimensional_artifact_task(table_name, attestation_result, reconciliation_result, quality_result, silver_result=None):
-    """Accept only a complete local Iceberg artifact from the quality task."""
-    logging.getLogger("airflow.task").warning(
-        "dimensional artifact transport table=%s attestation_type=%s quality_type=%s",
-        table_name, type(attestation_result).__name__, type(quality_result).__name__,
-    )
-    if isinstance(quality_result, str) and "=" in quality_result:
+def build_dimensional_parquet_artifact_task(table_name, silver_result):
+    """Build cumulative Gold lineage from verified Silver Parquet manifests."""
+    if not isinstance(silver_result, dict) or silver_result.get("table_name") != table_name:
+        raise RuntimeError(f"Invalid Silver result for {table_name}")
+    if silver_result.get("status") != "PASS":
+        raise RuntimeError(f"Silver Parquet verification did not PASS: {table_name}")
+    manifest_key = silver_result.get("manifest_key")
+    if not isinstance(manifest_key, str) or not manifest_key:
+        raise RuntimeError(f"Silver manifest key is missing: {table_name}")
+    bucket = os.environ.get("BRONZE_BUCKET")
+    if bucket == TEST_BUCKET:
+        scope = build_bounded_e2e_scope(os.environ)
+        if not manifest_key.startswith(scope.prefix):
+            raise RuntimeError(f"Silver manifest is outside bounded scope: {table_name}")
+    client = create_minio_client()
+    def read_manifest(key):
+        document = client.get_object(bucket, key)
         try:
-            quality_result = json.loads(quality_result.rsplit("=", 1)[1].strip())
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"Invalid Iceberg quality payload: {table_name}") from exc
-    elif isinstance(quality_result, list):
-        for line in reversed(quality_result):
-            if not isinstance(line, str) or not line.lstrip().startswith("["):
-                continue
-            try:
-                parsed = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(parsed, list):
-                quality_result = parsed
-                break
-    from gold.implementation.dimensional.lineage import normalize_dimensional_artifact
-    try:
-        return normalize_dimensional_artifact(
-            table_name, attestation_result, reconciliation_result, quality_result,
-            bronze_batch_id=silver_result.get("batch_id") if isinstance(silver_result, dict) else None,
-            row_count=silver_result.get("silver_row_count") if isinstance(silver_result, dict) else None,
-        )
-    except ValueError as exc:
-        raise RuntimeError(str(exc)) from exc
+            value = json.loads(document.read().decode("utf-8"))
+        finally:
+            document.close()
+            document.release_conn()
+        if value.get("table_name") != table_name or value.get("status") != "COMPLETED":
+            raise RuntimeError(f"Invalid Silver completion manifest: {table_name}")
+        return value
+
+    current = read_manifest(manifest_key)
+    prefix = manifest_key.rsplit("batch_id=", 1)[0]
+    manifest_keys = sorted(
+        item.object_name
+        for item in client.list_objects(bucket, prefix=prefix, recursive=True)
+        if item.object_name.endswith("/_BATCH_METADATA.json")
+    )
+    if manifest_key not in manifest_keys:
+        raise RuntimeError(f"Current Silver manifest is not discoverable: {table_name}")
+    manifests = [read_manifest(key) for key in manifest_keys]
+    identities = [hashlib.sha256(json.dumps(item, sort_keys=True, separators=(",", ":")).encode()).hexdigest() for item in manifests]
+    return build_parquet_lineage_artifact(
+        table=table_name,
+        bucket=bucket,
+        manifest_key=manifest_key,
+        data_prefix=current["data_prefix"],
+        manifest_identity=identities[manifest_keys.index(manifest_key)],
+        batch_id=current["batch_id"],
+        row_count=sum(item["silver_row_count"] for item in manifests),
+        bronze_batch_id=current["batch_id"],
+        manifest_keys=manifest_keys,
+        manifest_identities=identities,
+        data_prefixes=[item["data_prefix"] for item in manifests],
+    )
 
 
 @task(task_id="verify_gold_dimensional_graph_manifest", retries=0)
@@ -84,7 +104,7 @@ def verify_gold_dimensional_graph_manifest_task(writer_result):
 
 @task(task_id="resolve_gold_dimensional_lineage", retries=0)
 def resolve_gold_dimensional_lineage_task(silver_results: dict):
-    """Validate caller-supplied Iceberg lineage for the native graph only."""
+    """Validate caller-supplied Silver Parquet lineage for the native graph."""
     if not isinstance(silver_results, dict) or any(
         not isinstance(result, dict) or result.get("status") != "PASS"
         for result in silver_results.values()
@@ -95,7 +115,7 @@ def resolve_gold_dimensional_lineage_task(silver_results: dict):
     scope = build_bounded_e2e_scope(os.environ) if bucket == TEST_BUCKET else None
     artifacts = {}
     for table, result in silver_results.items():
-        artifact = result.get("dimensional_artifact") if "dimensional_artifact" in result else result
+        artifact = result
         if not isinstance(artifact, dict):
             raise RuntimeError(f"Invalid dimensional artifact envelope: {table}")
         artifacts[table] = artifact

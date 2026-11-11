@@ -11,8 +11,8 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from pipeline_contracts import TABLES
-from pipeline_operators import (create_gold_dimensional_confirmation_operator, create_gold_dimensional_operator, create_incremental_silver_operator, create_lakehouse_attestation_operator, create_lakehouse_migration_operator, create_lakehouse_quality_operator, create_lakehouse_reconcile_operator)
-from pipeline_tasks.gold import (build_dimensional_artifact_task, gold_dimensional_gate, resolve_gold_dimensional_lineage_task, skip_gold_dimensional, verify_gold_dimensional_graph_manifest_task)
+from pipeline_operators import (create_gold_dimensional_confirmation_operator, create_gold_dimensional_operator, create_incremental_silver_operator)
+from pipeline_tasks.gold import (build_dimensional_parquet_artifact_task, gold_dimensional_gate, resolve_gold_dimensional_lineage_task, skip_gold_dimensional, verify_gold_dimensional_graph_manifest_task)
 from pipeline_tasks.ingestion import ingest_incremental, validate_config, validate_incremental
 from pipeline_tasks.silver import check_silver_eligibility, pipeline_summary, silver_result, skip_silver, verify_silver_manifest
 
@@ -45,26 +45,15 @@ def ecommerce_incremental_ingestion():
     summary = pipeline_summary(results)
     dimensional_artifacts = {}
     for table in TABLES:
-        migration = create_lakehouse_migration_operator(table_name=table, project_path=PROJECT_PATH)
-        attestation = create_lakehouse_attestation_operator(table_name=table, project_path=PROJECT_PATH)
-        reconcile = create_lakehouse_reconcile_operator(table_name=table, project_path=PROJECT_PATH)
-        quality = create_lakehouse_quality_operator(table_name=table, project_path=PROJECT_PATH)
-        verify[table] >> migration >> attestation >> reconcile >> quality
-        # Pass explicit XCom values into the TaskFlow normalizer. Passing the
-        # DockerOperator objects themselves leaks operator metadata instead of
-        # the JSON contracts emitted by the CLI tasks.
-        artifact = build_dimensional_artifact_task.override(task_id=f"dimensional_artifact_{table}")(
-            table, attestation.output, reconcile.output, quality.output, results[table]
+        artifact = build_dimensional_parquet_artifact_task.override(task_id=f"dimensional_parquet_artifact_{table}")(
+            table, results[table]
         )
-        migration >> artifact
-        attestation >> artifact
-        reconcile >> artifact
-        quality >> artifact
+        verify[table] >> artifact
         dimensional_artifacts[table] = artifact
 
     dimensional_gate = gold_dimensional_gate(summary)
     # The dimensional branch must not decide before all six artifact contracts
-    # have completed; otherwise a slow attestation/quality task can cause the
+    # have completed; otherwise a slow Silver artifact task can cause the
     # writer to be skipped while the DAG is still running.
     list(dimensional_artifacts.values()) >> dimensional_gate
     dimensional_lineage = resolve_gold_dimensional_lineage_task(dimensional_artifacts)

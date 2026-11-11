@@ -57,6 +57,33 @@ def build_runtime_dimensional_metadata(*, lineage, result, mode, environment=Non
     status = "PASS" if mode == "WRITE" and result.get("status") in {"PUBLISHED", "ALREADY_PUBLISHED"} else "DRY_RUN"
     graph_identity = result.get("graph", {}).get("identity")
     gold_snapshot_id = f"gold_snap_{graph_identity}" if status == "PASS" and graph_identity else None
+    if all(source.get("source_type") == "parquet_manifest" for source in sources.values()):
+        silver_ids = {table: source["manifest_identity"] for table, source in sources.items()}
+        gold_ids = {
+            item["table"]: item["manifest"]["snapshot_id"]
+            for item in result.get("tables", [])
+            if isinstance(item, dict) and isinstance(item.get("manifest"), dict)
+        }
+        # Keep the persisted envelope backward-compatible while assigning the
+        # fields their new meaning: Silver identifiers are manifest identities,
+        # and Iceberg identifiers are Gold output snapshots only.
+        return build_gold_run_metadata(
+            run_id=run_id,
+            bronze_batch_ids={table: source.get("bronze_batch_id") for table, source in sources.items()},
+            silver_snapshots=silver_ids,
+            iceberg_snapshots=gold_ids or {table: None for table in sources},
+            attestations=silver_ids,
+            evidence=silver_ids,
+            gold_snapshot_id=gold_snapshot_id,
+            status=status,
+            code_sha=code_sha,
+            started_at=started.isoformat().replace("+00:00", "Z"),
+            completed_at=completed.isoformat().replace("+00:00", "Z"),
+            duration_seconds=max(0, (completed - started).total_seconds()),
+            rows_read=sum(source.get("row_count", 0) for source in sources.values()),
+            rows_written=sum(item.get("row_count", 0) for item in result.get("quality", {}).values()),
+            rows_rejected=0,
+        )
     return build_gold_run_metadata(
         run_id=run_id,
         bronze_batch_ids={table: source.get("bronze_batch_id") for table, source in sources.items()},

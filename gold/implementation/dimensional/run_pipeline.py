@@ -26,7 +26,7 @@ except ImportError:  # executed by spark-submit as a standalone script
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="Run native dimensional Iceberg Gold graph")
+    parser = argparse.ArgumentParser(description="Run native dimensional Gold Iceberg graph from Silver Parquet")
     parser.add_argument("--source-lineage", required=True, help="Path to strict dimensional lineage JSON")
     parser.add_argument("--dim-date-start", required=True)
     parser.add_argument("--dim-date-end", required=True)

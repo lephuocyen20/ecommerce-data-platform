@@ -5,9 +5,7 @@ import os
 from datetime import timedelta
 
 from airflow.providers.docker.operators.docker import DockerOperator
-from airflow.providers.standard.operators.empty import EmptyOperator
 from docker.types import Mount
-from lakehouse_dependencies import PARENT_COMPLETION_TRIGGER_RULE
 from common.bounded_e2e_scope import BoundedE2EScopeError, build_bounded_e2e_scope
 
 
@@ -40,9 +38,6 @@ def _bounded_scope_environment():
         "LAKEHOUSE_E2E_TEST_BUCKET": scope.bucket,
         "LAKEHOUSE_E2E_RUN_ID": scope.run_id,
         "LAKEHOUSE_E2E_PREFIX": scope.prefix,
-        "LAKEHOUSE_E2E_WAREHOUSE": scope.warehouse,
-        "LAKEHOUSE_E2E_NESSIE_REF": scope.nessie_ref,
-        "LAKEHOUSE_E2E_SILVER_NAMESPACE": scope.silver_namespace,
     }
 
 
@@ -74,72 +69,11 @@ def create_incremental_silver_operator(*, table_name, project_path):
     )
 
 
-def create_lakehouse_migration_operator(*, table_name, project_path):
-    """Generic verified-Parquet to Iceberg task; table behavior lives in TableSpec."""
-    manifest_key = "{{ ti.xcom_pull(task_ids='verify_silver_" + table_name + "')['manifest_key'] }}"
-    return create_spark_submit_operator(task_id=f"silver_parquet_to_iceberg_{table_name}", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/run.py", arguments=["--table-name", table_name, "--manifest-key", manifest_key], extra_environment={"LAKEHOUSE_WRITE_ENABLED": os.environ.get("LAKEHOUSE_WRITE_ENABLED", "false"), **_bounded_scope_environment()}, extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], do_xcom_push=True)
-
-
-def create_lakehouse_reconcile_operator(*, table_name, project_path):
-    manifest_key = "{{ ti.xcom_pull(task_ids='verify_silver_" + table_name + "')['manifest_key'] }}"
-    return create_spark_submit_operator(task_id=f"verify_iceberg_{table_name}", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/migration/reconcile.py", arguments=["--table-name", table_name, "--manifest-key", manifest_key], extra_environment=_bounded_scope_environment(), extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], do_xcom_push=True, xcom_all=True)
-
-
-def create_lakehouse_attestation_operator(*, table_name, project_path):
-    manifest_key = "{{ ti.xcom_pull(task_ids='verify_silver_" + table_name + "')['manifest_key'] }}"
-    return create_spark_submit_operator(task_id=f"attest_iceberg_{table_name}", project_path=project_path, script_path=f"{SPARK_WORKDIR}/lakehouse/attestation_cli.py", arguments=["--table-name", table_name, "--manifest-key", manifest_key], extra_environment=_bounded_scope_environment(), extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)], do_xcom_push=True, xcom_all=True)
-
-
-def create_lakehouse_quality_operator(*, table_name, project_path):
-    """Run the read-only quality contract; a FAIL/ERROR blocks downstream work."""
-    return create_spark_submit_operator(
-        task_id=f"quality_iceberg_{table_name}",
-        project_path=project_path,
-        script_path=f"{SPARK_WORKDIR}/lakehouse/quality/cli.py",
-        arguments=["--table-name", table_name, "--manifest-key", "{{ ti.xcom_pull(task_ids='verify_silver_" + table_name + "')['manifest_key'] }}"],
-        extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)],
-        extra_environment=_bounded_scope_environment(),
-        do_xcom_push=True,
-        xcom_all=True,
-    )
-
-
-def create_lakehouse_completion_operator(*, table_name):
-    """Join an Iceberg parent write and its intentional no-op branch.
-
-    A skipped/no-op parent permits FK children; a failed parent does not.
-    """
-    return EmptyOperator(
-        task_id=f"iceberg_{table_name}_completion",
-        trigger_rule=PARENT_COMPLETION_TRIGGER_RULE,
-        retries=0,
-    )
-
-
-def create_silver_snapshot_operator(*, table_name, project_path, database_environment):
-    """Create the immutable Silver snapshot task for one table."""
-    return create_spark_submit_operator(
-        task_id=f"snapshot_{table_name}",
-        project_path=project_path,
-        script_path=f"{SPARK_WORKDIR}/silver/run_snapshot.py",
-        extra_environment=database_environment,
-        arguments=["--table-name", table_name],
-        extra_mounts=[
-            Mount(
-                source=project_path + r"\ingestion",
-                target=f"{SPARK_WORKDIR}/ingestion",
-                type="bind",
-                read_only=True,
-            ),
-        ],
-    )
-
-
 def create_gold_dimensional_operator(*, source_task_id, project_path, mode="DRY_RUN"):
     """Create the single native dimensional graph writer.
 
     This operator has no PostgreSQL/Warehouse dependency; lineage and Silver
-    reads are resolved by the Spark dimensional CLI from attested Iceberg data.
+    reads are resolved by the Spark dimensional CLI from verified Parquet data.
     """
     if mode not in {"DRY_RUN", "WRITE"}:
         raise ValueError("Unsupported dimensional Gold mode")

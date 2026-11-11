@@ -93,8 +93,8 @@ def verify_silver_manifest(table_name, validation_result):
     if actual != expected:
         raise ValueError("Silver Parquet objects do not match completion manifest")
     result = {"table_name": table_name, "status": "PASS", "batch_id": batch_id, "manifest_key": manifest_key, "silver_row_count": row_count}
-    # Native Gold consumes only a verified migration/attestation/reconciliation/
-    # quality envelope; absence remains fail-closed in the lineage builder.
+    # Native Gold consumes the verified Silver Parquet manifest directly;
+    # absence remains fail-closed in the lineage builder.
     if "dimensional_artifact" in manifest:
         result["dimensional_artifact"] = manifest["dimensional_artifact"]
     return result

@@ -103,9 +103,9 @@ def validate_unselected_ingestion_result(table_name, ingestion_result):
 def ingest_incremental(table_name: str, config: dict):
     if table_name not in config["tables"]:
         # Return a successful no-op instead of skipping the TaskFlow task.  FK
-        # completion gates must distinguish an intentional unselected parent
-        # from a failed parent so a selected child can use existing Iceberg
-        # parent state.
+        # Completion gates must distinguish an intentionally unselected parent
+        # from a failed parent so a selected child can use existing parent
+        # state.
         return build_unselected_ingestion_result(table_name, config["mode"])
     project_path = "/opt/airflow/project"
     if project_path not in sys.path:

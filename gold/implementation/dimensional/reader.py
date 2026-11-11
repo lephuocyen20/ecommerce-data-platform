@@ -1,11 +1,15 @@
-"""Pinned, attested Iceberg reads for the dimensional graph."""
+"""Verified Silver source reads for the dimensional graph."""
+
+import hashlib
+import json
 
 from common.manifest import read_json_object
+from common.object_integrity import discover_parquet_objects
 from lakehouse.attestation import read_snapshot_attestation
 from lakehouse.evidence import verify_evidence
 from lakehouse.models.spec import SPECS
 from .contracts import DIMENSIONAL_SOURCE_TABLES
-from .lineage import DimensionalLineageError, validate_dimensional_lineage
+from .lineage import DimensionalLineageError, PARQUET_MANIFEST, validate_dimensional_lineage
 
 
 def _read_evidence(client, bucket, identity, scope=None):
@@ -18,9 +22,60 @@ def _read_evidence(client, bucket, identity, scope=None):
     return document
 
 
+def _read_parquet_sources(spark, client, bucket, lineage, scope=None):
+    """Read only completion-manifest verified Silver Parquet data."""
+    result = {}
+    for table in DIMENSIONAL_SOURCE_TABLES:
+        source = lineage["sources"][table]
+        if source["bucket"] != bucket:
+            raise DimensionalLineageError(f"Parquet bucket mismatch for {table}")
+        frames = []
+        for index, manifest_key in enumerate(source["manifest_keys"]):
+            manifest = read_json_object(client, bucket, manifest_key)
+            identity = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            prefix = source["data_prefixes"][index]
+            if identity != source["manifest_identities"][index]:
+                raise DimensionalLineageError(f"Parquet manifest identity mismatch for {table}")
+            if manifest.get("status") != "COMPLETED" or manifest.get("table_name") != table or manifest.get("data_prefix") != prefix:
+                raise DimensionalLineageError(f"Parquet manifest metadata mismatch for {table}")
+            expected = sorted(manifest.get("parquet_objects", []), key=lambda item: item.get("object_key", ""))
+            actual = discover_parquet_objects(client, bucket, prefix, include_etag=True)
+            if actual != expected:
+                raise DimensionalLineageError(f"Silver Parquet inventory mismatch for {table}")
+            try:
+                frames.append(spark.read.parquet(f"s3a://{bucket}/{prefix}").select(*SPECS[table].columns))
+            except Exception as exc:
+                raise DimensionalLineageError(f"Silver Parquet source unavailable: {table}") from exc
+        try:
+            dataframe = frames[0]
+            for frame in frames[1:]:
+                dataframe = dataframe.unionByName(frame)
+            if not hasattr(spark, "sparkContext"):
+                dataframe = dataframe.dropDuplicates([SPECS[table].key])
+            else:
+                from pyspark.sql import Window, functions as F
+                key = SPECS[table].key
+                watermark = SPECS[table].watermark or SPECS[table].columns[-1]
+                window = Window.partitionBy(key).orderBy(F.col(watermark).desc(), F.col(key).desc())
+                dataframe = dataframe.withColumn("_silver_rank", F.row_number().over(window)).where(F.col("_silver_rank") == 1).drop("_silver_rank")
+        except ImportError:
+            dataframe = frames[0]
+            for frame in frames[1:]:
+                dataframe = dataframe.unionByName(frame)
+            dataframe = dataframe.dropDuplicates([SPECS[table].key])
+        except Exception as exc:
+            raise DimensionalLineageError(f"Silver Parquet state assembly failed: {table}") from exc
+        if tuple(dataframe.columns) != SPECS[table].columns:
+            raise DimensionalLineageError(f"Silver schema drift for {table}")
+        result[table] = dataframe
+    return result
+
+
 def read_dimensional_sources(spark, client, bucket, lineage, scope=None):
-    """Verify every authorization artifact before reading a pinned Silver snapshot."""
+    """Verify Silver lineage before reading immutable source data."""
     validate_dimensional_lineage(lineage, scope=scope)
+    if lineage["source_type"] == PARQUET_MANIFEST:
+        return _read_parquet_sources(spark, client, bucket, lineage, scope=scope)
     result = {}
     source_catalog = "lakehouse"
     source_namespace = scope.silver_namespace if scope is not None else "silver"

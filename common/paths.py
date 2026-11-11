@@ -1,4 +1,4 @@
-"""Canonical object-key conventions for Bronze, Silver and Silver snapshots."""
+"""Canonical object-key conventions for Bronze and incremental Silver."""
 
 import os
 import re
@@ -39,10 +39,3 @@ def silver_incremental_batch_paths(table_name, batch_id, *, validate_batch_id=Tr
     suffix = f"silver_incremental/{table_name}/batch_id={batch_id}/"
     batch_prefix = scope.key(suffix) if scope is not None else suffix
     return {"batch_prefix": batch_prefix, "runs_prefix": batch_prefix + "runs/", "manifest_key": batch_prefix + "_BATCH_METADATA.json"}
-
-
-def silver_snapshot_paths(table_name, snapshot_id):
-    _require_name(table_name, "snapshot table")
-    _require_name(snapshot_id, "snapshot ID")
-    snapshot_prefix = f"silver_snapshots/{table_name}/snapshots/snapshot_id={snapshot_id}/"
-    return {"snapshot_prefix": snapshot_prefix, "data_prefix": snapshot_prefix + "data/", "manifest_key": snapshot_prefix + "_SNAPSHOT_METADATA.json"}
