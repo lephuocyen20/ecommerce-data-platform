@@ -85,7 +85,26 @@ def register_pending_batch(conn, metadata):
     if metadata["table_name"] not in TABLE_CONFIG:
         raise ValueError("Unsupported table")
 
-    query = """
+    replay_fields = ("replay_cursor_timestamp", "replay_cursor_id", "replay_upper_timestamp", "replay_upper_id")
+    if any(field in metadata for field in replay_fields):
+        query = """
+        INSERT INTO public.ingestion_batches (
+            batch_id, table_name, watermark_type, start_timestamp, start_id,
+            end_timestamp, end_id, row_count, object_key, checksum_sha256, status,
+            replay_cursor_timestamp, replay_cursor_id, replay_upper_timestamp, replay_upper_id
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING batch_id, table_name, status
+        """
+        values = (
+            metadata["batch_id"], metadata["table_name"], metadata["watermark_type"],
+            metadata["start_timestamp"], metadata["start_id"], metadata["end_timestamp"],
+            metadata["end_id"], metadata["row_count"], metadata["object_key"],
+            metadata["checksum_sha256"], metadata["status"], metadata.get("replay_cursor_timestamp"),
+            metadata.get("replay_cursor_id", 0), metadata.get("replay_upper_timestamp"),
+            metadata.get("replay_upper_id", 0),
+        )
+    else:
+        query = """
         INSERT INTO public.ingestion_batches (
             batch_id,
             table_name,
@@ -105,12 +124,12 @@ def register_pending_batch(conn, metadata):
         )
         RETURNING batch_id, table_name, status
     """
-    values = (
+        values = (
         metadata["batch_id"], metadata["table_name"], metadata["watermark_type"],
         metadata["start_timestamp"], metadata["start_id"], metadata["end_timestamp"],
         metadata["end_id"], metadata["row_count"], metadata["object_key"],
         metadata["checksum_sha256"], metadata["status"],
-    )
+        )
     with conn.cursor() as cursor:
         cursor.execute(query, values)
         result = cursor.fetchone()
@@ -133,6 +152,10 @@ def get_batch_metadata(conn, batch_id):
             object_key,
             checksum_sha256,
             status,
+            replay_cursor_timestamp,
+            replay_cursor_id,
+            replay_upper_timestamp,
+            replay_upper_id,
             created_at,
             updated_at
         FROM public.ingestion_batches

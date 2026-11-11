@@ -13,8 +13,8 @@ def migration_module(table_name):
     return None
 
 
-def migration_api(table_name):
+def migration_api(table_name, scope=None):
     """Normalize legacy migration module spellings behind one small interface."""
     from lakehouse.migration.manifest import discover_manifests, migrate_manifest
-    return (lambda client, bucket: discover_manifests(client, bucket, table_name),
-            lambda spark, client, bucket, key, manifest=None: migrate_manifest(spark, client, bucket, key, table_name, manifest))
+    return (lambda client, bucket: discover_manifests(client, bucket, table_name, scope),
+            lambda spark, client, bucket, key, manifest=None: migrate_manifest(spark, client, bucket, key, table_name, manifest, scope=scope))

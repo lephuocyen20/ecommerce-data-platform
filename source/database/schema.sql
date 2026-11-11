@@ -76,7 +76,11 @@ CREATE TABLE IF NOT EXISTS public.order_items (
     unit_price DECIMAL(12, 2) NOT NULL
         CHECK (unit_price >= 0),
     discount_amount DECIMAL(12, 2) NOT NULL DEFAULT 0
-        CHECK (discount_amount >= 0)
+        CHECK (discount_amount >= 0),
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    _is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMP,
+    CHECK ((_is_deleted AND deleted_at IS NOT NULL) OR (NOT _is_deleted AND deleted_at IS NULL))
 );
 
 CREATE TABLE IF NOT EXISTS public.payments (
@@ -95,7 +99,11 @@ CREATE TABLE IF NOT EXISTS public.payments (
     status VARCHAR(30) NOT NULL
         CHECK (status IN ('PENDING', 'SUCCESS', 'FAILED', 'REFUNDED')),
     transaction_id VARCHAR(100) NOT NULL UNIQUE,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    _is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMP,
+    CHECK ((_is_deleted AND deleted_at IS NOT NULL) OR (NOT _is_deleted AND deleted_at IS NULL))
 );
 
 CREATE TABLE IF NOT EXISTS public.shipments (
@@ -137,6 +145,10 @@ CREATE INDEX IF NOT EXISTS idx_order_items_product_id
     ON public.order_items (product_id);
 CREATE INDEX IF NOT EXISTS idx_payments_order_id
     ON public.payments (order_id);
+CREATE INDEX IF NOT EXISTS idx_order_items_updated_at_order_item_id
+    ON public.order_items (updated_at, order_item_id);
+CREATE INDEX IF NOT EXISTS idx_payments_updated_at_payment_id
+    ON public.payments (updated_at, payment_id);
 CREATE INDEX IF NOT EXISTS idx_shipments_order_id
     ON public.shipments (order_id);
 CREATE INDEX IF NOT EXISTS idx_customers_updated_at_customer_id
@@ -176,6 +188,18 @@ BEFORE UPDATE ON public.orders
 FOR EACH ROW
 EXECUTE FUNCTION public.set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_order_items_updated_at ON public.order_items;
+CREATE TRIGGER trg_order_items_updated_at
+BEFORE UPDATE ON public.order_items
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_payments_updated_at ON public.payments;
+CREATE TRIGGER trg_payments_updated_at
+BEFORE UPDATE ON public.payments
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
 DROP TRIGGER IF EXISTS trg_shipments_updated_at ON public.shipments;
 CREATE TRIGGER trg_shipments_updated_at
 BEFORE UPDATE ON public.shipments
@@ -201,6 +225,10 @@ CREATE TABLE IF NOT EXISTS public.ingestion_watermarks (
         CHECK (last_id >= 0),
     last_batch_id VARCHAR(32),
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    replay_cursor_timestamp TIMESTAMP,
+    replay_cursor_id BIGINT NOT NULL DEFAULT 0 CHECK (replay_cursor_id >= 0),
+    replay_upper_timestamp TIMESTAMP,
+    replay_upper_id BIGINT NOT NULL DEFAULT 0 CHECK (replay_upper_id >= 0),
     CHECK (
         (watermark_type = 'TIMESTAMP')
         OR (watermark_type = 'ID' AND last_timestamp IS NULL)
@@ -238,6 +266,10 @@ CREATE TABLE IF NOT EXISTS public.ingestion_batches (
         CHECK (status IN ('PENDING', 'UPLOADED', 'COMMITTED', 'FAILED')),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    replay_cursor_timestamp TIMESTAMP,
+    replay_cursor_id BIGINT NOT NULL DEFAULT 0 CHECK (replay_cursor_id >= 0),
+    replay_upper_timestamp TIMESTAMP,
+    replay_upper_id BIGINT NOT NULL DEFAULT 0 CHECK (replay_upper_id >= 0),
     CHECK (
         (watermark_type = 'TIMESTAMP' AND end_timestamp IS NOT NULL)
         OR (
@@ -303,6 +335,9 @@ CREATE TABLE IF NOT EXISTS raw.order_items (
     quantity INTEGER NOT NULL,
     unit_price DECIMAL(12, 2) NOT NULL,
     discount_amount DECIMAL(12, 2) NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    _is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMP,
     _silver_batch_id VARCHAR(32) NOT NULL
         CHECK (_silver_batch_id ~ '^[0-9a-f]{32}$'),
     _loaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -316,6 +351,9 @@ CREATE TABLE IF NOT EXISTS raw.payments (
     status VARCHAR(30) NOT NULL,
     transaction_id VARCHAR(100) NOT NULL,
     created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    _is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMP,
     _silver_batch_id VARCHAR(32) NOT NULL
         CHECK (_silver_batch_id ~ '^[0-9a-f]{32}$'),
     _loaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

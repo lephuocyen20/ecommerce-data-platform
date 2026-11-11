@@ -1,387 +1,65 @@
-# E-Commerce Data Platform
+# Ecommerce Data Platform
 
-**End-to-End Data Engineering Project | Batch & Incremental Data Processing**
+Production-oriented local data platform for a dimensional Iceberg lakehouse.
+The supported path is:
 
-An end-to-end data engineering platform that ingests e-commerce transactional data from PostgreSQL, processes it through Bronze and Silver data layers, loads curated data into a PostgreSQL data warehouse, and builds analytical models using dbt.
+`PostgreSQL source → Bronze (MinIO) → verified Silver (Spark/Iceberg) → Gold dimensions/facts`
 
-The project focuses on **data reliability, incremental processing, recoverability, transactional consistency, and data quality**.
+Airflow orchestrates the pipeline, while lineage attestation, data-quality
+gates, replay controls, tombstones, and run metadata make each stage auditable
+and safe to retry.
 
-## 1. Project Overview
+## Current roadmap
 
-This project simulates an e-commerce data platform handling six core business entities:
+The version-controlled roadmap is [`docs/GOLD_LAKEHOUSE_PLAN.md`](docs/GOLD_LAKEHOUSE_PLAN.md).
+The current scope is local validation and runtime certification of the
+Bronze → Silver → Gold lakehouse. Production routing, consumer cutover, and
+unbounded writes remain explicitly out of scope.
 
-- Customers
-- Products
-- Orders
-- Order Items
-- Payments
-- Shipments
+The former PostgreSQL analytical Warehouse/dbt path is retired. Its legacy
+checkpoint structures and compatibility modules are retained only where they
+are still needed for controlled backfill or reconciliation.
 
-The platform demonstrates the development of a data pipeline from source data generation to analytics-ready dimensional and fact models.
+## Main components
 
-**Key engineering objectives:**
-
-- Build reproducible local data infrastructure using Docker.
-- Implement incremental data ingestion with checkpoint and watermark tracking.
-- Store raw data in a MinIO-based Bronze layer.
-- Transform and validate data using Apache Spark.
-- Load processed data into a PostgreSQL warehouse.
-- Build analytical models using dbt.
-- Support recovery, rollback, and controlled write operations.
-
-## 2. System Architecture
-
-```mermaid
-flowchart TD
-    A["PostgreSQL Source Database"] --> B["Python Incremental Ingestion"]
-    B --> C["MinIO Bronze Layer"]
-    C --> D["Apache Spark Transformation"]
-    D --> E["Silver Layer - Parquet"]
-    E --> F["PostgreSQL Data Warehouse"]
-    F --> G["dbt Staging Models"]
-    G --> H["Dimensional Models"]
-    G --> I["Fact Models"]
-
-    J["Apache Airflow"] -.-> B
-    J -.-> D
-    J -.-> F
-    J -.-> G
-
-    K["Validation & Data Quality"] -.-> C
-    K -.-> E
-    K -.-> G
-```
-
-**Data flow:**
-
-`PostgreSQL → Incremental Ingestion → MinIO Bronze → Spark Silver → PostgreSQL Warehouse → dbt Analytics`
-
-Apache Airflow orchestrates the pipeline, while validation and checkpoint mechanisms help protect data consistency.
-
-## 3. Technology Stack
-
-| Technology | Purpose |
+| Component | Responsibility |
 |---|---|
-| Python | Data generation, ingestion, orchestration logic |
-| PostgreSQL | Transactional source and data warehouse |
-| Apache Airflow | Workflow orchestration |
-| Apache Spark | Distributed data transformation |
-| MinIO | S3-compatible object storage |
-| Parquet | Columnar Silver-layer storage |
-| dbt | SQL transformations, dimensional modeling, testing |
-| Docker Compose | Local infrastructure management |
-| pytest | Automated testing |
-| Git & GitHub | Version control and project documentation |
+| PostgreSQL | Source transactions and Airflow metadata |
+| MinIO | Bounded Bronze and Iceberg object storage |
+| Spark | Silver transformations, Iceberg migration, and Gold processing |
+| Nessie | Versioned Iceberg REST catalog |
+| Airflow | Dependency-aware orchestration and runtime evidence |
+| pytest | Unit, integration, and explicitly gated E2E checks |
 
-## 4. Data Pipeline
-
-### 4.1 Source Data Generation
-
-Python scripts generate synthetic e-commerce records, including customers, products, orders, order items, payments, and shipments.
-
-Source files are located in:
-
-`source/generator/`
-
-Database schema definitions are maintained in:
-
-`source/database/`
-
-### 4.2 Incremental Ingestion
-
-The ingestion framework extracts data from PostgreSQL and uploads batches to MinIO.
-
-It includes:
-
-- Incremental extraction using watermarks.
-- Batch metadata and checkpoint management.
-- Recovery of incomplete ingestion operations.
-- Explicit write permissions.
-- DRY_RUN support for safe execution.
-
-Implementation:
-
-`ingestion/incremental/`
-
-Airflow DAG:
-
-`airflow/dags/ecommerce_incremental_ingestion.py`
-
-### 4.3 Bronze Layer
-
-The Bronze layer preserves ingested source records in MinIO.
-
-Batch metadata and manifests support traceability and downstream processing.
-
-### 4.4 Silver Layer
-
-Apache Spark transforms Bronze records into structured Parquet datasets.
-
-Transformation modules cover all six business entities.
-
-Implementation:
-
-`transformation/`
-
-Validation contracts:
-
-`validation/contracts/silver.yml`
-
-### 4.5 Data Warehouse
-
-Processed Silver data is loaded incrementally into PostgreSQL.
-
-The warehouse loading framework includes:
-
-- Incremental batch processing.
-- Raw-table upsert operations.
-- Checkpoint tracking.
-- Transaction rollback protection.
-- Recovery-oriented orchestration.
-
-Implementation:
-
-`warehouse/loader/`
-
-## 5. Analytics Modeling with dbt
-
-The dbt project is located at:
-
-`warehouse/ecommerce_dbt/`
-
-### Staging Models
-
-Staging models standardize warehouse source data for downstream analytical transformations.
-
-### Dimension Models
-
-| Model | Description |
-|---|---|
-| `dim_customers` | Customer dimension |
-| `dim_products` | Product dimension |
-| `dim_date` | Date dimension |
-
-### Fact Models
-
-| Model | Description |
-|---|---|
-| `fact_orders` | Order-level facts |
-| `fact_order_items` | Order-item facts |
-| `fact_payments` | Payment facts |
-| `fact_shipments` | Shipment facts |
-
-dbt model configuration and data tests are maintained alongside SQL models in YAML files.
-
-## 6. Data Reliability & Recovery
-
-Reliability is a central focus of this project.
-
-**Incremental ingestion recovery**
-
-Batch tracking and recovery logic help resume processing when ingestion operations are interrupted.
-
-**Checkpoint consistency**
-
-Watermark and checkpoint management prevent incomplete batches from being treated as successfully processed.
-
-**Transactional warehouse loading**
-
-Warehouse operations use transaction boundaries to protect data consistency when a batch fails.
-
-**Write safety**
-
-The incremental Airflow DAG defaults to `DRY_RUN`.
-
-WRITE mode requires explicit table selection and appropriate environment permissions, including:
-
-- `INGESTION_WRITE_ENABLED=true`
-- `WAREHOUSE_WRITE_ENABLED=true`
-- `GOLD_SNAPSHOT_WRITE_ENABLED=true` (chỉ khi muốn publish Gold snapshot)
-
-These controls are intended to prevent accidental data modifications during development and testing.
-
-## 7. Testing & Validation
-
-The repository contains automated tests for:
-
-- Incremental extraction.
-- Batch repository behavior.
-- Watermark management.
-- Checkpoint commits.
-- Recovery and retry scenarios.
-- Staging operations.
-- Write safety.
-- Warehouse atomic rollback.
-- Warehouse checkpoint failure rollback.
-- Warehouse upsert rollback.
-
-**Validated project milestones:**
-
-| Validation | Result |
-|---|---|
-| Ingestion recovery integration checks | PASS — 8/8 |
-| dbt data tests | PASS — 148/148 |
-| Controlled end-to-end WRITE pipeline | PASS |
-
-These results represent completed development validation runs rather than a continuous production monitoring guarantee.
-
-## 8. Project Structure
-
-The canonical module map, including the Silver/Gold migration boundary, is in
-[PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md).
+## Repository layout
 
 ```text
-ecommerce-data-platform/
-├── airflow/              # Airflow DAGs and Docker configuration
-├── docs/                 # Operational documentation
-├── ingestion/            # Batch and incremental ingestion
-├── source/               # PostgreSQL schema and data generators
-├── spark/                # Spark runtime configuration
-├── tests/                # Automated tests
-├── transformation/       # Bronze-to-Silver transformations
-├── validation/           # Data quality checks and contracts
-├── warehouse/
-│   ├── loader/           # Incremental warehouse loading
-│   ├── ecommerce_dbt/    # dbt analytical models
-│   ├── dbt.Dockerfile
-│   └── dbt_profiles/
-├── .env.example          # Environment configuration template
-└── docker-compose.yml    # Local infrastructure
+airflow/dags/       Airflow DAGs and task operators
+common/             Shared safety, scope, and storage helpers
+gold/               Gold dimensional contracts and transformations
+ingestion/          Source-to-Bronze ingestion and replay logic
+lakehouse/          Iceberg migration, attestation, reconciliation, quality
+silver/             Silver validation and snapshot utilities
+source/             Source generators, database schema, and author-only SQL
+tests/              Safe regression and bounded integration tests
+docs/               Roadmap, architecture, runbook, and evidence
 ```
 
-## 9. Getting Started
+## Local verification
 
-### Prerequisites
-
-- Docker Desktop with Docker Compose
-- Git
-- Python
-- PowerShell or a compatible terminal
-
-### Clone the Repository
-
-```bash
-git clone https://github.com/lephuocyen20/ecommerce-data-platform.git
-cd ecommerce-data-platform
-```
-
-### Configure Environment Variables
-
-Create a local `.env` file based on `.env.example`.
+Read [`docs/RUNBOOK.md`](docs/RUNBOOK.md) before starting services. The safe
+regression suite does not write to shared lakehouse data:
 
 ```powershell
-Copy-Item .env.example .env
+python -m pytest -q -m "unit or integration" -p no:cacheprovider
 ```
 
-Replace example values with your own credentials and review the database, MinIO, and Airflow configuration before starting the services.
+Bounded Iceberg E2E writes require the explicit `LAKEHOUSE_E2E_*` approval and
+scope described in [`AGENTS.md`](AGENTS.md). No production or shared-service
+cutover is implied by a local PASS.
 
-**Never commit `.env` or real credentials to version control.**
+## Development status
 
-### Start Infrastructure
-
-```powershell
-docker compose up -d postgres minio
-```
-
-Initialize Airflow when setting up the environment for the first time:
-
-```powershell
-docker compose run --rm airflow-init
-```
-
-Start the Airflow services:
-
-```powershell
-docker compose up -d airflow-api-server airflow-scheduler airflow-dag-processor
-```
-
-Check service status:
-
-```powershell
-docker compose ps
-```
-
-### Airflow DAGs
-
-| DAG | Purpose | Schedule |
-|---|---|---|
-| `ecommerce_incremental_ingestion` | Incremental ingestion and downstream processing | Manual |
-
-The incremental DAG defaults to `DRY_RUN`. WRITE execution requires explicit configuration and should only be enabled after reviewing the operational runbook.
-
-### Gold Layer in the Incremental DAG
-
-After a successful `WRITE` run has loaded the warehouse and completed `dbt
-build`, `ecommerce_incremental_ingestion` can create immutable Silver snapshots
-and validate all four Gold marts. Set `GOLD_SNAPSHOT_WRITE_ENABLED=true` on the
-Airflow scheduler before triggering that run. Gold WRITE validates lineage,
-source quality, output quality and grain; it then acquires a fencing lock,
-writes immutable Parquet, verifies the snapshot and publishes its manifest.
-
-The Airflow Graph shows the exact lineage through `snapshot_*` and
-`gold_sources_*` tasks:
-
-```mermaid
-flowchart LR
-    BO[Bronze orders batch] --> TO[bronze_to_silver_orders] --> SO[snapshot_orders]
-    BI[Bronze order_items batch] --> TI[bronze_to_silver_order_items] --> SI[snapshot_order_items]
-    BP[Bronze products batch] --> TP[bronze_to_silver_products] --> SP[snapshot_products]
-    BC[Bronze customers batch] --> TC[bronze_to_silver_customers] --> SC[snapshot_customers]
-    BPAY[Bronze payments batch] --> TPAY[bronze_to_silver_payments] --> SPAY[snapshot_payments]
-
-    SO --> DS[gold_sources_daily_sales] --> GDS[gold_daily_sales]
-    SI --> DS
-    SP --> PP[gold_sources_product_performance] --> GPP[gold_product_performance]
-    SO --> PP
-    SI --> PP
-    SC --> CM[gold_sources_customer_metrics] --> GCM[gold_customer_metrics]
-    SO --> CM
-    SI --> CM
-    SPAY --> PS[gold_sources_payment_summary] --> GPS[gold_payment_summary]
-```
-
-For every table, Airflow already exposes the batch-level sequence as
-`ingest_<table> → validate_<table> → bronze_to_silver_<table> →
-verify_silver_<table>`. The validation and verification task logs include the
-Bronze `batch_id`, object key, checksum, Silver manifest key and row count.
-
-For additional operational guidance, see [RUNBOOK.md](docs/RUNBOOK.md).
-
-### Test suites
-
-Tests are classified so that they can be run at an appropriate scope:
-
-```powershell
-# Isolated tests; no external services required.
-python -m pytest -m unit
-
-# Spark, PostgreSQL, or MinIO dependent tests.
-python -m pytest -m integration
-
-# Full external-service pipeline scenarios; trigger intentionally.
-python -m pytest -m e2e
-```
-
-The default CI workflow runs the unit and integration suites. E2E scenarios
-require prepared source data and are kept separate from every push.
-
-## 10. Future Improvements
-
-Potential next steps include:
-
-- Analytics dashboard development.
-- Streaming ingestion and near-real-time processing.
-- CI/CD automation.
-- Automated observability and alerting.
-- Performance benchmarking.
-- Cloud deployment.
-
-## 11. Project Status
-
-The project has completed a controlled end-to-end batch and incremental processing workflow, including ingestion, transformation, warehouse loading, dbt modeling, and associated validation.
-
-The current implementation is intended as a practical, locally reproducible Data Engineering portfolio project.
-
----
-
-**Project focus:** Building reliable, recoverable, and testable data pipelines using open-source data engineering technologies.
+The implementation is organized into independently reviewable local commits.
+Check the roadmap for the latest phase verdict, evidence, warnings, and the
+next required approval gate.

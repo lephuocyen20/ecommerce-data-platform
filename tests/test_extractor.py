@@ -121,6 +121,47 @@ def test_watermark_type_mismatch():
 
     cursor.execute.assert_not_called()
 
+
+def test_late_overlap_uses_replay_window_and_monotonic_checkpoint(monkeypatch):
+    conn, cursor = make_connection()
+    monkeypatch.setenv("LATE_DATA_OVERLAP_ENABLED", "true")
+    cursor.fetchone.return_value = (datetime(2026, 1, 3, tzinfo=timezone.utc), 101)
+    cursor.description = [("product_id",), ("updated_at",)]
+    cursor.fetchall.return_value = [(101, datetime(2026, 1, 2, tzinfo=timezone.utc))]
+    result = extractor.extract_incremental(
+        conn, "products",
+        {"watermark_type": "TIMESTAMP", "last_timestamp": datetime(2026, 1, 2, tzinfo=timezone.utc),
+         "last_id": 100, "replay_cursor_timestamp": None, "replay_cursor_id": 0,
+         "replay_upper_timestamp": None},
+    )
+    assert result["checkpoint_timestamp"] == datetime(2026, 1, 2, tzinfo=timezone.utc)
+    assert result["checkpoint_id"] == 101
+    assert result["replay_upper_timestamp"] == datetime(2026, 1, 3, tzinfo=timezone.utc)
+    assert result["replay_upper_id"] == 101
+    assert len(cursor.execute.call_args_list) == 2
+
+
+def test_late_overlap_replay_cursor_advances_across_batches_same_timestamp(monkeypatch):
+    monkeypatch.setenv("LATE_DATA_OVERLAP_ENABLED", "true")
+    conn, cursor = make_connection()
+    cursor.description = [("product_id",), ("updated_at",)]
+    cursor.fetchall.return_value = [(102, datetime(2026, 1, 2, tzinfo=timezone.utc))]
+    first = extractor.extract_incremental(conn, "products", {
+        "watermark_type": "TIMESTAMP", "last_timestamp": datetime(2026, 1, 2, tzinfo=timezone.utc),
+        "last_id": 100, "replay_cursor_timestamp": datetime(2026, 1, 1, tzinfo=timezone.utc),
+         "replay_cursor_id": 101, "replay_upper_timestamp": datetime(2026, 1, 2, tzinfo=timezone.utc), "replay_upper_id": 103,
+    }, batch_size=1)
+    assert first["replay_cursor_id"] == 102
+    assert first["checkpoint_id"] == 102
+    cursor.fetchall.return_value = [(103, datetime(2026, 1, 2, tzinfo=timezone.utc))]
+    second = extractor.extract_incremental(conn, "products", {
+        "watermark_type": "TIMESTAMP", "last_timestamp": first["checkpoint_timestamp"],
+        "last_id": first["checkpoint_id"], "replay_cursor_timestamp": first["replay_cursor_timestamp"],
+        "replay_cursor_id": first["replay_cursor_id"], "replay_upper_timestamp": first["replay_upper_timestamp"], "replay_upper_id": first["replay_upper_id"],
+    }, batch_size=1)
+    assert second["replay_cursor_id"] == 103
+    assert second["replay_upper_timestamp"] is None
+
 def test_timestamp_incremental_sql_structure():
     conn, cursor = make_connection()
     ts = datetime(2026, 1, 1, tzinfo=timezone.utc)

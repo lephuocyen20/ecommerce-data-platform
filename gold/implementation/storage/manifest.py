@@ -9,6 +9,7 @@ from gold.implementation.storage.contract import (
     GOLD_STORAGE_VERSION,
     GoldStorageContractError,
     build_gold_storage_metadata,
+    build_gold_storage_metadata_v2,
 )
 from gold.implementation.identity import (
     TRANSFORMATION_VERSION,
@@ -132,6 +133,7 @@ def build_gold_manifest(
     parquet_objects,
     created_at=None,
     transformation_version=TRANSFORMATION_VERSION,
+    source_lineage=None,
 ):
     """
     Build immutable Gold snapshot manifest metadata.
@@ -139,10 +141,10 @@ def build_gold_manifest(
     Does not write data or publish the manifest.
     """
 
-    metadata = build_gold_storage_metadata(
-        dataset_name=dataset_name,
-        snapshot_id=snapshot_id,
-        source_snapshots=source_snapshots,
+    metadata = (
+        build_gold_storage_metadata_v2(dataset_name, snapshot_id, source_lineage)
+        if source_lineage is not None
+        else build_gold_storage_metadata(dataset_name, snapshot_id, source_snapshots)
     )
 
     if (

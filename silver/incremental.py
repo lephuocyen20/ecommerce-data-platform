@@ -27,6 +27,7 @@ try:
         bronze_incremental_object_key,
         silver_incremental_batch_paths,
     )
+    from common.bounded_e2e_scope import TEST_BUCKET, build_bounded_e2e_scope
     from common.object_integrity import (
         calculate_object_sha256,
         discover_parquet_objects,
@@ -37,6 +38,7 @@ except ImportError:
     from bronze_to_silver import configure_s3, TRANSFORMS
     from shared.paths import bronze_incremental_object_key, silver_incremental_batch_paths
     from shared.object_integrity import calculate_object_sha256, discover_parquet_objects
+    from common.bounded_e2e_scope import TEST_BUCKET, build_bounded_e2e_scope
 
 
 VALID_BATCH_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -136,6 +138,7 @@ def verify_published_manifest(
     batch_id,
     object_key,
     bronze_checksum,
+    scope=None,
 ):
     if manifest.get("status") != "COMPLETED":
         raise ValueError("Invalid Silver manifest status")
@@ -151,7 +154,7 @@ def verify_published_manifest(
     if manifest.get("bronze_checksum_sha256") != bronze_checksum:
         raise ValueError("Silver manifest Bronze checksum mismatch")
     expected_prefix = silver_incremental_batch_paths(
-        table_name, batch_id
+        table_name, batch_id, scope=scope
     )["runs_prefix"]
 
     data_prefix = manifest.get("data_prefix")
@@ -268,7 +271,7 @@ def publish_manifest(client, bucket, manifest_key, manifest):
 
 
 
-def transform_batch( spark, client, table_name, batch_id, object_key, bronze_checksum):
+def transform_batch( spark, client, table_name, batch_id, object_key, bronze_checksum, scope=None):
     bucket = BRONZE_BUCKET
 
     if not client.bucket_exists(bucket):
@@ -278,7 +281,7 @@ def transform_batch( spark, client, table_name, batch_id, object_key, bronze_che
             bucket,
          object_key,
             bronze_checksum,)
-    silver_paths = silver_incremental_batch_paths(table_name, batch_id)
+    silver_paths = silver_incremental_batch_paths(table_name, batch_id, scope=scope)
     batch_prefix = silver_paths["batch_prefix"]
     manifest_key = silver_paths["manifest_key"]
 
@@ -298,6 +301,7 @@ def transform_batch( spark, client, table_name, batch_id, object_key, bronze_che
             batch_id,
             object_key,
             bronze_checksum,
+            scope=scope,
         )
 
         print(
@@ -434,6 +438,7 @@ def transform_batch( spark, client, table_name, batch_id, object_key, bronze_che
             batch_id,
             object_key,
             bronze_checksum,
+            scope=scope,
         )
 
         print(
@@ -479,6 +484,8 @@ def main():
         args.bronze_checksum,
 )
 
+    scope = build_bounded_e2e_scope(os.environ) if BRONZE_BUCKET == TEST_BUCKET else None
+
     spark = (
         SparkSession.builder
         .master("local[2]")
@@ -500,6 +507,7 @@ def main():
             args.batch_id,
             args.object_key,
             args.bronze_checksum,
+            scope=scope,
             )
     finally:
         spark.stop()

@@ -2,7 +2,7 @@
 
 Run inside the Spark container after `nessie`, `minio`, and `spark` are ready:
 
-    /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/smoke_test.py
+    /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/diagnostics/smoke_test.py
 """
 
 import sys

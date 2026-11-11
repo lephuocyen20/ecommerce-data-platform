@@ -49,7 +49,7 @@ def validate_recovery_metadata(metadata):
             raise ValueError("Missing end_timestamp")
         if start_timestamp is not None and (end_timestamp, end_id) <= (
             start_timestamp, start_id
-        ):
+        ) and metadata.get("replay_cursor_timestamp") is None:
             raise ValueError("Invalid timestamp watermark order")
     if metadata["object_key"] != build_object_key(table_name, batch_id):
         raise ValueError("Object key mismatch")

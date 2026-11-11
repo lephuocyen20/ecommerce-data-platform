@@ -2,6 +2,7 @@
 """Build Gold payment_summary from verified Silver payments."""
 
 from pyspark.sql import functions as F
+from gold.implementation.revenue_policy import signed_amount
 
 
 def build_payment_summary(payments_df):
@@ -38,6 +39,9 @@ def build_payment_summary(payments_df):
             )
             .cast("decimal(20,2)")
             .alias("total_payment_amount"),
+            F.sum(signed_amount(F.col("amount").cast("decimal(20,2)"), "status"))
+            .cast("decimal(20,2)")
+            .alias("signed_revenue"),
         )
         .select(
             F.col("payment_method"),
@@ -45,6 +49,7 @@ def build_payment_summary(payments_df):
             F.col("payment_count"),
             F.col("distinct_order_count"),
             F.col("total_payment_amount"),
+            F.col("signed_revenue"),
         )
     )
 

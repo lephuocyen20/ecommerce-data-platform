@@ -1,8 +1,8 @@
 # Lakehouse Foundation
 
-The Lakehouse foundation runs alongside the existing Bronze, Silver, Warehouse,
-and dbt pipeline. Existing Parquet and warehouse flows are intentionally
-unchanged in this milestone.
+The Lakehouse foundation is the supported Bronze → Silver → Gold path. The
+former Raw Warehouse/dbt flow is retired; legacy checkpoint structures remain
+only for controlled backfill and reconciliation compatibility.
 
 ## Components
 
@@ -26,7 +26,7 @@ and an object-store access policy.
 ```powershell
 docker compose -f docker-compose.yml -f spark/docker-compose.spark.yml build spark
 docker compose -f docker-compose.yml -f spark/docker-compose.spark.yml up -d minio nessie spark
-docker exec ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/smoke_test.py
+docker exec ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/diagnostics/smoke_test.py
 docker exec ecommerce-spark python3 -m pytest -q -m e2e /opt/spark/work-dir/tests/test_lakehouse_e2e.py
 ```
 
@@ -37,104 +37,34 @@ table, writes two rows, reads them back through Nessie, and prints
 The pytest E2E test invokes this same bounded Spark submission, so it validates
 the actual image, Nessie catalog, and MinIO object store instead of mocks.
 
-## Cutover controls
+## Migration and cutover
 
-Warehouse loading remains on legacy Parquet by default. Set
-`CUSTOMERS_SILVER_SOURCE=iceberg` only after successful dual-run reconciliation,
-and also set `CUSTOMERS_ICEBERG_CUTOVER_ENABLED=true` for the reviewed cutover
-run. Set `CUSTOMERS_SILVER_SOURCE=parquet` to roll back immediately; no table
-data is deleted by this switch.
+Production migration and cutover procedures are intentionally omitted from this
+local-only runbook. Use the bounded smoke test above for local Iceberg validation.
 
-Products use the identical opt-in controls:
-`PRODUCTS_SILVER_SOURCE=iceberg` and
-`PRODUCTS_ICEBERG_CUTOVER_ENABLED=true`.  Both sources default to `parquet`.
-The Airflow Warehouse gate removes a cut-over table from the legacy loader, so
-one verified batch can never be loaded from both Parquet and Iceberg.
+Cutover readiness is represented by the read-only immutable preflight in
+`gold/implementation/cutover.py`. It defaults to the existing Parquet route and
+`DRY_RUN`; it cannot route consumers or enable writes. Runtime certification,
+semantic sign-off, operational proof, and consumer parity remain separate gates.
 
-## Customers migration and cutover
+## Read-only Iceberg metadata metrics
 
-Customers migrate from **verified Silver Parquet**, not directly from Bronze:
+`lakehouse/diagnostics/iceberg_metrics.py` collects the latest snapshot and
+file/record/byte totals from Iceberg metadata tables only. It is observability
+only: no `MERGE`, `DELETE`, `UPDATE`, `ALTER`, `DROP`, `VACUUM`, cleanup or
+snapshot-expiration statement is allowed. Run it only against an explicitly
+scoped catalog/table list; it does not authorize maintenance or cutover.
 
-```text
-Silver Parquet manifest -> Iceberg customers -> cumulative reconciliation
-```
+## Products and order-items migration
 
-Backfill all historical manifests (explicit write permission required):
-
-```powershell
-docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run.py --table-name customers --backfill
-```
-
-Migrate one verified batch:
-
-```powershell
-docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run.py --table-name customers --manifest-key silver_incremental/customers/batch_id=<batch-id>/_BATCH_METADATA.json
-```
-
-Reconcile cumulative Parquet and Iceberg state:
-
-```powershell
-docker exec ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/reconcile_customers.py
-```
-
-Warehouse remains on Parquet by default. After a reviewed reconciliation PASS,
-set `CUSTOMERS_SILVER_SOURCE=iceberg` and
-`CUSTOMERS_ICEBERG_CUTOVER_ENABLED=true`. Roll back by setting source back to
-`parquet`; neither Parquet nor Iceberg data is deleted.
-
-## Products migration and cutover
-
-Products follow the same verified migration contract:
-
-```text
-Silver Parquet manifest -> Iceberg products -> cumulative reconciliation
-```
-
-```powershell
-# Historical backfill (explicit write permission)
-docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run.py --table-name products --backfill
-
-# One incremental manifest
-docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run.py --table-name products --manifest-key silver_incremental/products/batch_id=<batch-id>/_BATCH_METADATA.json
-
-# Read-only cumulative reconciliation
-docker exec ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/reconcile_products.py
-```
-
-After reconciliation passes, enable `PRODUCTS_SILVER_SOURCE=iceberg` plus
-`PRODUCTS_ICEBERG_CUTOVER_ENABLED=true` for a reviewed run. Restore
-`PRODUCTS_SILVER_SOURCE=parquet` and disable the cutover flag to roll back.
-Parquet remains the migration and rollback source during this window.
-
-## Order-items migration and cutover
-
-Order items use the same manifest-protected migration path and are reconciled
-against the complete Silver Parquet history before they can be used by the
-Warehouse:
-
-```powershell
-# Historical backfill (explicit write permission)
-docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run.py --table-name order_items --backfill
-
-# One verified incremental manifest
-docker exec -e LAKEHOUSE_WRITE_ENABLED=true ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/run.py --table-name order_items --manifest-key silver_incremental/order_items/batch_id=<batch-id>/_BATCH_METADATA.json
-
-# Read-only reconciliation: rows, business-column hashes, and Order/Product FKs
-docker exec ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/migration/reconcile_order_items.py
-```
-
-The Airflow dual-run performs migration and reconciliation while the Warehouse
-continues loading Parquet. To cut over a reviewed run, set both
-`ORDER_ITEMS_SILVER_SOURCE=iceberg` and
-`ORDER_ITEMS_ICEBERG_CUTOVER_ENABLED=true`. The DAG then loads the pinned
-Iceberg snapshot and records its immutable snapshot lineage in
-`warehouse.loaded_batches`. Revert the source to `parquet` to roll back; this
-does not delete either source.
+Migration, cutover, rollback, and Airflow dual-run procedures are not available
+in this local-only runbook. Use only the bounded smoke test above; no executable
+cutover flags or write commands are documented here.
 
 ## Regression coverage
 
 `test_iceberg_customers_manifest_migration` creates a fresh Silver Parquet
 batch and manifest in MinIO, verifies object inventory/ETag integrity,
 migrates it into a disposable Iceberg table, verifies progress replay is
-idempotent, then removes all test objects. This covers the production manifest
+ idempotent, then removes all test objects. This covers the disposable local manifest
 path rather than only in-memory merge behavior.

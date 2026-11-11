@@ -10,7 +10,7 @@ import pytest
 @pytest.mark.e2e
 def test_iceberg_nessie_smoke_test():
     """Create, write, and read a disposable Iceberg table through Nessie."""
-    smoke_test = Path("/opt/spark/work-dir/lakehouse/smoke_test.py")
+    smoke_test = Path("/opt/spark/work-dir/lakehouse/diagnostics/smoke_test.py")
     if not smoke_test.exists():
         pytest.skip("Lakehouse E2E test must run inside the configured Spark container")
 

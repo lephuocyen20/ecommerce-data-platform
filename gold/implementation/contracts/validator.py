@@ -60,6 +60,7 @@ def validate_gold_contract(dataset_name):
         "sources",
         "primary_key",
         "columns",
+        "semantic",
     }
 
     if set(contract) != required_fields:
@@ -71,6 +72,10 @@ def validate_gold_contract(dataset_name):
     grain = contract["grain"]
     primary_key = contract["primary_key"]
     sources = contract["sources"]
+    semantic = contract["semantic"]
+
+    if not isinstance(semantic, dict) or semantic.get("version") != "1.0":
+        raise ValueError(f"{dataset_name}: invalid semantic contract")
 
     if not isinstance(columns, dict) or not columns:
         raise ValueError(

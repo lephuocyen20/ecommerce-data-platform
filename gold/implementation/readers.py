@@ -15,6 +15,12 @@ from silver.snapshots.recovery import (
 from silver.snapshots.verifier import (
     verify_snapshot,
 )
+from gold.implementation.source_lineage import (
+    ICEBERG_SNAPSHOT,
+    PARQUET_SNAPSHOT,
+    GoldSourceLineageError,
+    validate_source_lineage,
+)
 
 
 def read_gold_source(
@@ -133,3 +139,77 @@ def read_gold_sources(
         )
 
     return sources
+
+
+def _read_evidence(client, bucket, identity):
+    """Read an immutable evidence document; identity is content-addressed."""
+    key = f"lakehouse/evidence/v2/{identity}.json"
+    response = client.get_object(bucket, key)
+    try:
+        import json
+        document = json.loads(response.read().decode("utf-8"))
+    finally:
+        response.close()
+        response.release_conn()
+    if not isinstance(document, dict) or document.get("identity") != identity:
+        raise GoldSourceLineageError("Lakehouse evidence identity mismatch")
+    return document
+
+
+def read_iceberg_gold_sources(spark, client, bucket, dataset_name, lineage):
+    """Read only explicit Iceberg snapshots after evidence verification.
+
+    SQL identifiers are assembled solely after strict contract validation; the
+    snapshot is selected with time travel, never the mutable table head.
+    """
+    validate_source_lineage(lineage, dataset_name)
+    if lineage["source_type"] != ICEBERG_SNAPSHOT:
+        raise GoldSourceLineageError("Iceberg reader requires iceberg_snapshot lineage")
+    contract = get_gold_contract(dataset_name)
+    from lakehouse.evidence import verify_evidence
+    from lakehouse.attestation import read_snapshot_attestation
+    sources = {}
+    for table in contract["sources"]:
+        source = lineage["sources"][table]
+        snapshot_id = source["snapshot_id"]
+        read_snapshot_attestation(
+            client, bucket, source["snapshot_attestation_identity"],
+            table=table, catalog=source["catalog"], namespace=source["namespace"],
+            ref=source["ref"], snapshot_id=snapshot_id,
+        )
+        for evidence_name in ("reconciliation_evidence", "quality_evidence"):
+            expected = source[evidence_name]
+            actual = _read_evidence(client, bucket, expected["identity"])
+            kind = "reconciliation" if evidence_name == "reconciliation_evidence" else "quality"
+            verify_evidence(
+                actual, kind=kind, table=table, snapshot_id=snapshot_id,
+                catalog=source["catalog"], namespace=source["namespace"],
+                ref=source["ref"],
+                snapshot_attestation_identity=source["snapshot_attestation_identity"],
+            )
+            if {key: actual[key] for key in expected} != expected:
+                raise GoldSourceLineageError(f"{evidence_name} artifact mismatch")
+        identifier = f"{source['catalog']}.{source['namespace']}.{source['table']}"
+        try:
+            dataframe = spark.sql(f"SELECT * FROM {identifier} VERSION AS OF {snapshot_id}")
+        except Exception as exc:
+            raise GoldSourceLineageError(
+                f"Pinned Iceberg snapshot cannot be read: {identifier}@{snapshot_id}"
+            ) from exc
+        sources[table] = {
+            "dataframe": dataframe,
+            "table_name": table,
+            "snapshot_id": snapshot_id,
+            "source_type": ICEBERG_SNAPSHOT,
+            "lineage": source,
+        }
+    return sources
+
+
+def read_gold_sources_from_lineage(spark, client, bucket, dataset_name, lineage):
+    """Compatibility router for v2 Gold lineage envelopes."""
+    validate_source_lineage(lineage, dataset_name)
+    if lineage["source_type"] == PARQUET_SNAPSHOT:
+        snapshots = {table: source["snapshot_id"] for table, source in lineage["sources"].items()}
+        return read_gold_sources(spark, client, bucket, dataset_name, snapshots)
+    return read_iceberg_gold_sources(spark, client, bucket, dataset_name, lineage)

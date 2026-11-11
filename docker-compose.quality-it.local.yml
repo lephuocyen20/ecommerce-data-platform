@@ -1,0 +1,117 @@
+name: quality-it-local-${QUALITY_IT_RUN_ID:-dev}
+
+services:
+  minio-init:
+    build:
+      context: .
+      dockerfile: spark/Dockerfile
+    image: ecommerce-spark:3.5.6
+    environment:
+      QUALITY_IT_MINIO_ENDPOINT: ${QUALITY_IT_MINIO_ENDPOINT:-host.docker.internal:9000}
+      QUALITY_IT_MINIO_ACCESS_KEY: ${QUALITY_IT_MINIO_ACCESS_KEY:?QUALITY_IT_MINIO_ACCESS_KEY is required}
+      QUALITY_IT_MINIO_SECRET_KEY: ${QUALITY_IT_MINIO_SECRET_KEY:?QUALITY_IT_MINIO_SECRET_KEY is required}
+      QUALITY_IT_BUCKET: ${QUALITY_IT_BUCKET:-ecommerce-quality-it}
+    entrypoint: ["python3", "-c"]
+    command:
+      - |
+        import os, time, urllib.request
+        from minio import Minio
+        endpoint = os.environ["QUALITY_IT_MINIO_ENDPOINT"]
+        for _ in range(60):
+            try:
+                urllib.request.urlopen(f"http://{endpoint}/minio/health/live", timeout=2)
+                break
+            except Exception:
+                time.sleep(1)
+        else:
+            raise SystemExit("MinIO readiness probe timed out")
+        c = Minio(endpoint, access_key=os.environ["QUALITY_IT_MINIO_ACCESS_KEY"], secret_key=os.environ["QUALITY_IT_MINIO_SECRET_KEY"], secure=False)
+        bucket = os.environ["QUALITY_IT_BUCKET"]
+        c.make_bucket(bucket) if not c.bucket_exists(bucket) else None
+    networks: [quality-it-local]
+
+  nessie:
+    image: ghcr.io/projectnessie/nessie:0.108.8
+    user: "0:0"
+    environment:
+      NESSIE_VERSION_STORE_TYPE: ROCKSDB
+      NESSIE_VERSION_STORE_PERSIST_ROCKS_DATABASE_PATH: /var/lib/nessie
+      NESSIE_CATALOG_DEFAULT_WAREHOUSE: quality-it
+      NESSIE_CATALOG_WAREHOUSES_QUALITY_IT_LOCATION: s3a://${QUALITY_IT_BUCKET:-ecommerce-quality-it}
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_ENDPOINT: http://${QUALITY_IT_MINIO_ENDPOINT:-host.docker.internal:9000}
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_PATH_STYLE_ACCESS: "true"
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_REGION: us-east-1
+      NESSIE_CATALOG_SERVICE_S3_DEFAULT_OPTIONS_REMOTE_SIGNING_ENABLED: "false"
+      JAVA_OPTS_APPEND: >-
+        -Dnessie.catalog.service.s3.default-options.access-key=urn:nessie-secret:quarkus:quality-it-minio-credentials
+        -Dquality-it-minio-credentials.name=${QUALITY_IT_MINIO_ACCESS_KEY:?QUALITY_IT_MINIO_ACCESS_KEY is required}
+        -Dquality-it-minio-credentials.secret=${QUALITY_IT_MINIO_SECRET_KEY:?QUALITY_IT_MINIO_SECRET_KEY is required}
+    ports:
+      - "127.0.0.1:${QUALITY_IT_NESSIE_PORT:-19130}:19120"
+    volumes:
+      - quality_it_nessie_data:/var/lib/nessie
+    networks: [quality-it-local]
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+
+  nessie-ready:
+    build:
+      context: .
+      dockerfile: spark/Dockerfile
+    image: ecommerce-spark:3.5.6
+    depends_on:
+      nessie:
+        condition: service_started
+    entrypoint: ["python3", "-c"]
+    command:
+      - |
+        import time, urllib.request
+        for _ in range(60):
+            try:
+                urllib.request.urlopen("http://nessie:19120/api/v2/config", timeout=2)
+                break
+            except Exception:
+                time.sleep(1)
+        else:
+            raise SystemExit("Nessie readiness probe timed out")
+    networks: [quality-it-local]
+
+  spark:
+    build:
+      context: .
+      dockerfile: spark/Dockerfile
+    image: ecommerce-spark:3.5.6
+    command: sleep infinity
+    environment:
+      MINIO_ENDPOINT: ${QUALITY_IT_MINIO_ENDPOINT:-host.docker.internal:9000}
+      MINIO_ACCESS_KEY: ${QUALITY_IT_MINIO_ACCESS_KEY:?QUALITY_IT_MINIO_ACCESS_KEY is required}
+      MINIO_SECRET_KEY: ${QUALITY_IT_MINIO_SECRET_KEY:?QUALITY_IT_MINIO_SECRET_KEY is required}
+      BRONZE_BUCKET: ${QUALITY_IT_BUCKET:-ecommerce-quality-it}
+      NESSIE_URI: http://nessie:19120/api/v2
+      NESSIE_REF: main
+      AWS_ACCESS_KEY_ID: ${QUALITY_IT_MINIO_ACCESS_KEY:?QUALITY_IT_MINIO_ACCESS_KEY is required}
+      AWS_SECRET_ACCESS_KEY: ${QUALITY_IT_MINIO_SECRET_KEY:?QUALITY_IT_MINIO_SECRET_KEY is required}
+      AWS_REGION: us-east-1
+      QUALITY_IT_ENABLED: "false"
+      QUALITY_IT_GATE2_APPROVED: "0"
+    volumes:
+      - ./pytest.ini:/opt/spark/work-dir/pytest.ini:ro
+      - ./common:/opt/spark/work-dir/common:ro
+      - ./ingestion:/opt/spark/work-dir/ingestion:ro
+      - ./lakehouse:/opt/spark/work-dir/lakehouse:ro
+      - ./gold:/opt/spark/work-dir/gold:ro
+      - ./tests:/opt/spark/work-dir/tests:ro
+      - ./spark/conf/spark-defaults.quality-it.local.conf:/opt/spark/conf/spark-defaults.conf:ro
+    networks: [quality-it-local]
+    depends_on:
+      nessie-ready:
+        condition: service_completed_successfully
+
+volumes:
+  quality_it_nessie_data:
+    name: quality-it-local-nessie-${QUALITY_IT_RUN_ID:-dev}
+
+networks:
+  quality-it-local:
+    name: quality-it-local-${QUALITY_IT_RUN_ID:-dev}

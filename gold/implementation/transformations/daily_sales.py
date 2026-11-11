@@ -1,5 +1,6 @@
 
 from pyspark.sql import functions as F
+from gold.implementation.revenue_policy import signed_amount
 
 
 MONEY_TYPE = "decimal(20,2)"
@@ -80,6 +81,7 @@ def build_daily_sales(orders_df, order_items_df):
             "order_date",
             F.to_date("order_date"),
         )
+        .withColumn("signed_revenue", signed_amount(F.col("net_amount"), "status").cast(MONEY_TYPE))
     )
 
     result = (
@@ -114,6 +116,7 @@ def build_daily_sales(orders_df, order_items_df):
             )
             .cast(MONEY_TYPE)
             .alias("delivered_order_value"),
+            F.sum("signed_revenue").cast(MONEY_TYPE).alias("signed_revenue"),
         )
         .select(
             "order_date",
@@ -124,6 +127,7 @@ def build_daily_sales(orders_df, order_items_df):
             "discount_amount",
             "net_order_value",
             "delivered_order_value",
+            "signed_revenue",
         )
     )
 

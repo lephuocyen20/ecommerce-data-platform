@@ -6,11 +6,21 @@ import os
 import re
 
 from airflow.exceptions import AirflowSkipException
-from airflow.sdk import get_current_context, task
+try:
+    from airflow.sdk import get_current_context, task
+except ImportError:
+    try:
+        from airflow.decorators import get_current_context, task
+    except ImportError:
+        def get_current_context():
+            raise RuntimeError("Airflow runtime context is unavailable")
+        def task(*_args, **_kwargs):
+            return lambda fn: fn
 from minio import Minio
 
 from pipeline_contracts import TABLES
 from pipeline_silver import get_silver_data_prefix, get_silver_manifest_key
+from common.paths import bronze_incremental_object_key
 
 
 @task.branch(retries=0)
@@ -38,7 +48,7 @@ def check_silver_eligibility(table_name, validation_result):
     batch_id = validation_result.get("batch_id")
     if not isinstance(batch_id, str) or not re.fullmatch(r"[0-9a-f]{32}", batch_id):
         raise ValueError("Invalid Bronze batch ID")
-    if validation_result.get("object_key") != f"bronze_incremental/{table_name}/batch_id={batch_id}/data.csv":
+    if validation_result.get("object_key") != bronze_incremental_object_key(table_name, batch_id):
         raise ValueError("Bronze object key mismatch")
     checksum = validation_result.get("bronze_checksum_sha256")
     if not isinstance(checksum, str) or not re.fullmatch(r"[0-9a-f]{64}", checksum):
@@ -72,7 +82,7 @@ def verify_silver_manifest(table_name, validation_result):
     if not isinstance(manifest, dict) or manifest.get("status") != "COMPLETED" or manifest.get("table_name") != table_name or manifest.get("batch_id") != batch_id or manifest.get("bronze_object_key") != validation_result["object_key"] or manifest.get("bronze_checksum_sha256") != validation_result["bronze_checksum_sha256"]:
         raise ValueError("Silver manifest metadata mismatch")
     row_count, data_prefix, objects = manifest.get("silver_row_count"), manifest.get("data_prefix"), manifest.get("parquet_objects")
-    if type(row_count) is not int or row_count < 0 or not isinstance(data_prefix, str) or not data_prefix.startswith(prefix) or not re.fullmatch(rf"silver_incremental/{table_name}/batch_id={batch_id}/runs/[0-9a-f]{{32}}/", data_prefix):
+    if type(row_count) is not int or row_count < 0 or not isinstance(data_prefix, str) or not data_prefix.startswith(prefix) or not re.fullmatch(rf"(?:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/)?silver_incremental/{table_name}/batch_id={batch_id}/runs/[0-9a-f]{{32}}/", data_prefix):
         raise ValueError("Invalid Silver manifest output metadata")
     if not isinstance(objects, list) or not objects or manifest.get("parquet_file_count") != len(objects):
         raise ValueError("Silver manifest has invalid Parquet metadata")
@@ -82,7 +92,12 @@ def verify_silver_manifest(table_name, validation_result):
     actual = sorted([{"object_key": item.object_name, "size": item.size, "etag": item.etag.strip('"')} for item in client.list_objects(os.environ["BRONZE_BUCKET"], prefix=data_prefix, recursive=True) if item.object_name.endswith(".parquet")], key=lambda item: item["object_key"])
     if actual != expected:
         raise ValueError("Silver Parquet objects do not match completion manifest")
-    return {"table_name": table_name, "status": "PASS", "batch_id": batch_id, "manifest_key": manifest_key, "silver_row_count": row_count}
+    result = {"table_name": table_name, "status": "PASS", "batch_id": batch_id, "manifest_key": manifest_key, "silver_row_count": row_count}
+    # Native Gold consumes only a verified migration/attestation/reconciliation/
+    # quality envelope; absence remains fail-closed in the lineage builder.
+    if "dimensional_artifact" in manifest:
+        result["dimensional_artifact"] = manifest["dimensional_artifact"]
+    return result
 
 
 @task(trigger_rule="none_failed_min_one_success", retries=0)
@@ -107,14 +122,21 @@ def silver_result(table_name, bronze_result):
 
 
 @task(trigger_rule="all_done", retries=0)
-def pipeline_summary():
+def pipeline_summary(silver_results: dict):
+    """Validate every table result passed explicitly by the Silver graph.
+
+    The explicit mapping makes all ``silver_result_*`` tasks upstream of this
+    reducer; the context pull remains limited to the shared configuration.
+    """
     ti = get_current_context()["ti"]
     config = ti.xcom_pull(task_ids="validate_config")
     if not isinstance(config, dict) or config.get("mode") not in ("DRY_RUN", "WRITE") or not isinstance(config.get("tables"), list):
         raise RuntimeError("PIPELINE_ABORTED: validate_config failed or produced no valid configuration")
+    if not isinstance(silver_results, dict) or set(silver_results) != set(config["tables"]):
+        raise RuntimeError("PIPELINE_ABORTED: incomplete Silver result inputs")
     completed, failed = {}, []
     for table_name in config["tables"]:
-        result = ti.xcom_pull(task_ids=f"silver_result_{table_name}")
+        result = silver_results[table_name]
         valid = isinstance(result, dict) and result.get("table_name") == table_name
         if valid and config["mode"] == "DRY_RUN":
             valid = result.get("status") == "SKIPPED" and result.get("reason") == "DRY_RUN"

@@ -12,10 +12,12 @@ Business model:
 from gold.lineage import GOLD_DATASET_SOURCES
 
 GOLD_CONTRACT_VERSION = "1.0"
+GOLD_SEMANTIC_CONTRACT_VERSION = "1.0"
 
 
 GOLD_DATASETS = {
     "daily_sales": {
+            "semantic": {"version": GOLD_SEMANTIC_CONTRACT_VERSION, "owner": "analytics", "timezone": "UTC", "business_day": "UTC calendar day", "measures": ["order_count", "gross_merchandise_value", "net_order_value", "signed_revenue"]},
         "grain": ["order_date"],
         "sources": list(GOLD_DATASET_SOURCES["daily_sales"]),
         "primary_key": ["order_date"],
@@ -28,10 +30,12 @@ GOLD_DATASETS = {
             "discount_amount": "decimal(20,2)",
             "net_order_value": "decimal(20,2)",
             "delivered_order_value": "decimal(20,2)",
+            "signed_revenue": "decimal(20,2)",
         },
     },
 
     "product_performance": {
+        "semantic": {"version": GOLD_SEMANTIC_CONTRACT_VERSION, "owner": "analytics", "timezone": "UTC", "business_day": "UTC calendar day", "measures": ["order_count", "units_ordered", "net_order_value"]},
         "grain": ["product_id"],
         "sources": list(GOLD_DATASET_SOURCES["product_performance"]),
         "primary_key": ["product_id"],
@@ -49,6 +53,7 @@ GOLD_DATASETS = {
     },
 
     "customer_metrics": {
+        "semantic": {"version": GOLD_SEMANTIC_CONTRACT_VERSION, "owner": "analytics", "timezone": "UTC", "business_day": "UTC calendar day", "measures": ["order_count", "total_order_value", "delivered_order_value"]},
         "grain": ["customer_id"],
         "sources": list(GOLD_DATASET_SOURCES["customer_metrics"]),
         "primary_key": ["customer_id"],
@@ -66,6 +71,7 @@ GOLD_DATASETS = {
     },
 
     "payment_summary": {
+        "semantic": {"version": GOLD_SEMANTIC_CONTRACT_VERSION, "owner": "analytics", "timezone": "UTC", "business_day": "UTC calendar day", "measures": ["payment_count", "distinct_order_count", "total_payment_amount", "signed_revenue"]},
         "grain": [
             "payment_method",
             "payment_status",
@@ -81,6 +87,7 @@ GOLD_DATASETS = {
             "payment_count": "long",
             "distinct_order_count": "long",
             "total_payment_amount": "decimal(20,2)",
+            "signed_revenue": "decimal(20,2)",
         },
     },
 }

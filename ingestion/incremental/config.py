@@ -1,5 +1,6 @@
 """Static configuration and input validation for incremental ingestion."""
 
+import os
 import re
 
 
@@ -27,15 +28,52 @@ TABLE_CONFIG = {
     },
     "order_items": {
         "primary_key": "order_item_id",
-        "watermark_column": "order_item_id",
-        "watermark_type": "ID",
+        "watermark_column": "updated_at",
+        "watermark_type": "TIMESTAMP",
+        "change_signal": "updated_at",
     },
     "payments": {
         "primary_key": "payment_id",
-        "watermark_column": "payment_id",
-        "watermark_type": "ID",
+        "watermark_column": "updated_at",
+        "watermark_type": "TIMESTAMP",
+        "change_signal": "updated_at",
     },
 }
+
+LATE_DATA_OVERLAP_ENABLED = "LATE_DATA_OVERLAP_ENABLED"
+LATE_DATA_OVERLAP_SECONDS = "LATE_DATA_OVERLAP_SECONDS"
+
+
+def late_data_overlap_enabled(environ=None):
+    """Return the explicit late-data replay flag.
+
+    The overlap is processed with a separate replay cursor; the committed
+    source watermark remains monotonic.
+    """
+    values = os.environ if environ is None else environ
+    value = values.get(LATE_DATA_OVERLAP_ENABLED, "false")
+    if not isinstance(value, str) or value.lower() not in {"true", "false"}:
+        raise ValueError(f"{LATE_DATA_OVERLAP_ENABLED} must be true or false")
+    return value.lower() == "true"
+
+
+def get_late_data_overlap_seconds(environ=None):
+    values = os.environ if environ is None else environ
+    if not late_data_overlap_enabled(values):
+        return 0
+    raw = values.get(LATE_DATA_OVERLAP_SECONDS, "86400")
+    try:
+        seconds = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{LATE_DATA_OVERLAP_SECONDS} must be a positive integer") from exc
+    if seconds <= 0:
+        raise ValueError(f"{LATE_DATA_OVERLAP_SECONDS} must be a positive integer")
+    return seconds
+
+
+def validate_extraction_contract(environ=None):
+    seconds = get_late_data_overlap_seconds(environ)
+    return {"late_data_overlap": seconds > 0, "late_data_overlap_seconds": seconds, "tombstone_policy": "TOMBSTONE_ONLY"}
 
 EXPECTED_DB_NAME = "ecommerce_platform"
 RECOVERABLE_STATUSES = ("PENDING", "UPLOADED")

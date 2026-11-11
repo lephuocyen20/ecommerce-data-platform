@@ -7,6 +7,7 @@ from gold.implementation.contracts.datasets import (
 
 
 GOLD_STORAGE_VERSION = "1.0"
+GOLD_STORAGE_LINEAGE_V2 = "2.0"
 GOLD_PREFIX = "gold"
 GOLD_SNAPSHOT_PREFIX = "gold_snap_"
 
@@ -144,4 +145,25 @@ def build_gold_storage_metadata(
         "primary_key": list(contract["primary_key"]),
         "source_snapshots": dict(source_snapshots),
         **paths,
+    }
+
+
+def build_gold_storage_metadata_v2(dataset_name, snapshot_id, source_lineage):
+    """Storage metadata for immutable v2 (Iceberg) source lineage."""
+    from gold.implementation.source_lineage import validate_source_lineage
+    validate_dataset_name(dataset_name)
+    validate_gold_snapshot_id(snapshot_id)
+    validate_source_lineage(source_lineage, dataset_name)
+    if source_lineage["source_type"] != "iceberg_snapshot":
+        raise GoldStorageContractError("Storage v2 requires iceberg_snapshot lineage")
+    contract = get_gold_contract(dataset_name)
+    return {
+        "manifest_version": GOLD_STORAGE_LINEAGE_V2,
+        "layer": "gold",
+        "dataset_name": dataset_name,
+        "snapshot_id": snapshot_id,
+        "contract_version": "2.0",
+        "primary_key": list(contract["primary_key"]),
+        "source_lineage": source_lineage,
+        **get_gold_storage_paths(dataset_name, snapshot_id),
     }

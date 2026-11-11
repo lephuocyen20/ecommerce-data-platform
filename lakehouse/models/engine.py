@@ -29,4 +29,12 @@ def merge(spark, prepared, spec, table=None):
         if spark.sql(f"SELECT count(*) n FROM {staged} s JOIN {table} t ON s.{spec.key}=t.{spec.key} WHERE s._record_hash <> t._record_hash").first().n: raise ValueError(f"{spec.name} immutable replay conflict")
         spark.sql(f"MERGE INTO {table} t USING {staged} s ON t.{spec.key}=s.{spec.key} WHEN NOT MATCHED THEN INSERT *")
     else:
-        audit = spec.audit_column or "_source_updated_at"; spark.sql(f"MERGE INTO {table} t USING {staged} s ON t.{spec.key}=s.{spec.key} WHEN MATCHED AND s.{audit} > t.{audit} THEN UPDATE SET * WHEN NOT MATCHED THEN INSERT *")
+        audit = spec.audit_column or "_source_updated_at"
+        conflict = spark.sql(
+            f"SELECT count(*) n FROM {staged} s JOIN {table} t "
+            f"ON s.{spec.key}=t.{spec.key} "
+            f"WHERE s.{audit}=t.{audit} AND s._record_hash<>t._record_hash"
+        ).first().n
+        if conflict:
+            raise ValueError(f"{spec.name} equal-watermark conflict")
+        spark.sql(f"MERGE INTO {table} t USING {staged} s ON t.{spec.key}=s.{spec.key} WHEN MATCHED AND s.{audit} > t.{audit} THEN UPDATE SET * WHEN NOT MATCHED THEN INSERT *")

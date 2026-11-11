@@ -3,6 +3,15 @@
 import re
 
 
+import os
+
+from common.bounded_e2e_scope import build_bounded_e2e_scope
+
+def _prefix():
+    if os.environ.get("BRONZE_BUCKET") == "ecommerce-data-lake":
+        return build_bounded_e2e_scope(os.environ).prefix
+    return ""
+
 def get_silver_manifest_key(table_name, batch_id):
     """Return the only valid completion-manifest key for a Silver batch."""
     if not isinstance(table_name, str) or not table_name:
@@ -11,7 +20,7 @@ def get_silver_manifest_key(table_name, batch_id):
         raise ValueError("Invalid Bronze batch ID")
 
     return (
-        f"silver_incremental/{table_name}/"
+        f"{_prefix()}silver_incremental/{table_name}/"
         f"batch_id={batch_id}/_BATCH_METADATA.json"
     )
 
@@ -19,4 +28,4 @@ def get_silver_manifest_key(table_name, batch_id):
 def get_silver_data_prefix(table_name, batch_id):
     """Return the immutable run-prefix base for a Silver batch."""
     get_silver_manifest_key(table_name, batch_id)
-    return f"silver_incremental/{table_name}/batch_id={batch_id}/runs/"
+    return f"{_prefix()}silver_incremental/{table_name}/batch_id={batch_id}/runs/"
