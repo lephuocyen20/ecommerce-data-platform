@@ -562,3 +562,16 @@ not perform external table/object writes.
   **PASS**.
 - Independent QA: **PASS**. Current Bronze → Silver → Gold entrypoints and
   compatibility/backfill modules were not affected.
+
+#### Cleanup batch 4 — unreferenced standalone diagnostics
+
+- Deleted `lakehouse/diagnostics/s3a_diagnostic.py`,
+  `tests/diagnose_gold_lock_latency.py`, and
+  `tests/inspect_gold_lineage_e2e.py`. None had runtime, DAG, docs, or test
+  references; canonical diagnostics and ownership/lineage modules remain.
+- Verification: related diagnostics/ownership/lineage checks **30 passed** in
+  the local run, independent QA recheck **62 passed, 4 subtests passed**,
+  `compileall` **PASS**, no-reference scan **PASS**, and `git diff --check`
+  **PASS**.
+- Independent QA: **PASS**. No current Bronze → Silver → Gold entrypoint or
+  roadmap behavior was affected.
