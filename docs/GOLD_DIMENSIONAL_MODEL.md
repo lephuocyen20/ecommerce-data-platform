@@ -26,10 +26,9 @@ no second discount/refund subtraction is performed.
 
 `gold.implementation.dimensional.writer` materializes the declared graph in the
 fixed order `dim_date -> dim_customer -> dim_product -> fact_orders ->
-fact_order_items -> fact_payments -> fact_shipments`.  It only
-reads explicit `lakehouse.silver` Iceberg snapshot IDs after snapshot
-attestation plus PASS reconciliation and quality evidence have been verified.
-It never reads a mutable Silver table head.
+fact_order_items -> fact_payments -> fact_shipments`. It reads only verified
+Silver Parquet completion manifests, then writes the declared Gold targets as
+Iceberg tables. It never reads a mutable Silver table head.
 
 The writer defaults to `DRY_RUN`.  A real `WRITE` additionally requires
 `GOLD_DIMENSIONAL_WRITE_ENABLED=true`; it creates only allowlisted

@@ -3,11 +3,12 @@
 Production-oriented local data platform for a dimensional Iceberg lakehouse.
 The supported path is:
 
-`PostgreSQL source → Bronze (MinIO) → verified Silver (Spark/Iceberg) → Gold dimensions/facts`
+`PostgreSQL source → Bronze (MinIO) → verified Silver Parquet → Gold Iceberg dimensions/facts`
 
-Airflow orchestrates the pipeline, while lineage attestation, data-quality
-gates, replay controls, tombstones, and run metadata make each stage auditable
-and safe to retry.
+Airflow orchestrates the pipeline, while manifest verification, replay
+controls, tombstones, and run metadata make each stage auditable and safe to
+retry. Gold performs the final dimensional quality validation before Iceberg
+writes.
 
 ## Current roadmap
 
@@ -25,8 +26,8 @@ are still needed for controlled backfill or reconciliation.
 | Component | Responsibility |
 |---|---|
 | PostgreSQL | Source transactions and Airflow metadata |
-| MinIO | Bounded Bronze and Iceberg object storage |
-| Spark | Silver transformations, Iceberg migration, and Gold processing |
+| MinIO | Bounded Bronze, Silver Parquet, and Gold object storage |
+| Spark | Silver transformations and Gold processing |
 | Nessie | Versioned Iceberg REST catalog |
 | Airflow | Dependency-aware orchestration and runtime evidence |
 | pytest | Unit, integration, and explicitly gated E2E checks |
@@ -38,8 +39,8 @@ airflow/dags/       Airflow DAGs and task operators
 common/             Shared safety, scope, and storage helpers
 gold/               Gold dimensional contracts and transformations
 ingestion/          Source-to-Bronze ingestion and replay logic
-lakehouse/          Iceberg migration, attestation, reconciliation, quality
-silver/             Silver validation and snapshot utilities
+lakehouse/          Iceberg diagnostics and legacy compatibility utilities
+silver/             Silver validation and incremental Parquet writers
 source/             Source generators, database schema, and author-only SQL
 tests/              Safe regression and bounded integration tests
 docs/               Roadmap, architecture, runbook, and evidence

@@ -1,6 +1,9 @@
 # Lakehouse
 
-This package contains the Iceberg/Nessie migration, attestation, quality, and diagnostic utilities used by the Silver → Gold lakehouse path.
+This package contains lakehouse diagnostics and explicitly invoked legacy
+Iceberg migration/attestation/quality utilities. The supported main path is
+Bronze → verified Silver Parquet → Gold Iceberg; these utilities are not part
+of the main Silver-to-Gold Airflow branch.
 
 - `migration/` — bounded Silver-to-Iceberg migration and reconciliation
 - `quality/` — read-only Iceberg quality contracts

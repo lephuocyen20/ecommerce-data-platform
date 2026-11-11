@@ -4,8 +4,8 @@ The supported local path is `PostgreSQL (source) → Bronze (MinIO) → Silver (
 
 ## Safety defaults
 
-- `INGESTION_WRITE_ENABLED=false`, `LAKEHOUSE_WRITE_ENABLED=false`, and
-  `GOLD_DIMENSIONAL_ENABLED=false` by default.
+- `INGESTION_WRITE_ENABLED=false` and `GOLD_DIMENSIONAL_ENABLED=false` by
+  default.
 - Native dimensional Gold remains `DRY_RUN` by default; any Gold `WRITE`
   requires `GOLD_DIMENSIONAL_WRITE_ENABLED=true` and bounded scope guards.
 - Do not remove PostgreSQL, MinIO, Nessie, or Airflow volumes as part of application cleanup.
@@ -27,13 +27,12 @@ user has approved a local stack run, recreate the Airflow containers so their
 environment receives `ecommerce-quality-it` and the explicit date bounds. Do
 not copy secrets into the example or point this configuration at production.
 The approved local E2E profile explicitly sets `INGESTION_WRITE_ENABLED=true`
-and `LAKEHOUSE_WRITE_ENABLED=true`
-for Silver-to-Iceberg artifact production while keeping
+for Silver Parquet artifact production while keeping
 `GOLD_DIMENSIONAL_WRITE_ENABLED=false` until the Gold write gate is separately
 approved.
-It also sets all six `*_SILVER_SOURCE=iceberg` values; `iceberg` is the only
-allowed non-Parquet source enum for the local migration branch. The legacy
-aggregate Gold write remains disabled.
+It sets all six `*_SILVER_SOURCE=parquet` values. Iceberg/Nessie is initialized
+only by the Gold dimensional writer; the legacy Silver migration branch is not
+part of the main DAG. The legacy aggregate Gold write remains disabled.
 `AIRFLOW_LOCAL_E2E_MODE=WRITE` supplies the explicit six-table local run
 configuration only when `BRONZE_BUCKET=ecommerce-quality-it`; normal runs still
 require explicit Airflow `dag_run.conf`.
@@ -64,8 +63,8 @@ the bounded local Gold date window.
 
 1. `ingest_*` reads PostgreSQL incrementally and writes validated Bronze objects when enabled.
 2. `validate_*` verifies checksums and batch contracts.
-3. `bronze_to_silver_*` runs Spark Silver transformation; manifest verification gates downstream tasks.
-4. Gold tasks resolve verified Silver lineage and write only when the Gold snapshot guard is explicitly enabled.
+3. `bronze_to_silver_*` runs Spark Silver transformation and publishes verified Parquet manifests.
+4. Gold revalidates the Parquet manifests, reads Silver Parquet, and writes only when the Gold snapshot guard is explicitly enabled.
 
 There is no `warehouse_gate`, raw PostgreSQL analytical loader, or `dbt_build` task.
 

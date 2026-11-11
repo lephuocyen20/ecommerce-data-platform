@@ -43,45 +43,29 @@ docker compose --env-file .env.quality-it.local -f docker-compose.quality-it.loc
 Do not use `down -v` unless you explicitly intend to delete this run's local
 volumes. This stack does not provide production certification.
 
-## Gold dimensional local fixture
+## Current Silver-to-Gold boundary
 
-After the smoke test passes, the bounded fixture runner can seed six tiny Silver
-Iceberg tables and execute Gold dimensional `DRY_RUN` against the same
-`ecommerce-quality-it` bucket:
+The supported Airflow path does not create Silver Iceberg tables. Silver writes
+immutable Parquet batches and completion manifests; Gold revalidates the
+cumulative manifest set, assembles the latest state by business key and
+`updated_at`, then performs a guarded Iceberg `DRY_RUN` or `WRITE`.
 
-```powershell
-docker compose --env-file .env.quality-it.local -f docker-compose.quality-it.local.yml exec spark `
-  /opt/spark/bin/spark-submit /opt/spark/work-dir/tests/run_gold_dimensional_local_fixture.py
-```
-
-The runner creates only `local-only-fixture` attestation/evidence and refuses
-any bucket other than `ecommerce-quality-it`. It never enables Gold `WRITE` and
-does not provide production certification.
-
-## Phase C local-stack runtime proof
-
-After the local stack is healthy, run the bounded late-correction scenario:
+The contract is covered without external writes by:
 
 ```powershell
-docker compose --env-file .env.quality-it.local -f docker-compose.quality-it.local.yml exec spark `
-  /opt/spark/bin/spark-submit /opt/spark/work-dir/tests/run_phase_c_local_stack.py
+.venv\Scripts\python.exe -m pytest -q `
+  tests/test_gold_parquet_source.py `
+  tests/test_gold_dimensional_writer.py
 ```
 
-This runner is restricted to bucket `ecommerce-quality-it`, the local Nessie
-endpoint and ref `main`. It uses `CREATE TABLE IF NOT EXISTS` plus `MERGE` only
-on the isolated Silver tables, reads the resulting Iceberg snapshot IDs from
-metadata, publishes matching local attestation/evidence, then invokes Gold
-`DRY_RUN` with that pinned lineage. It never writes Gold targets, enables Gold
-`WRITE`, performs cleanup/maintenance, or touches production/shared paths.
-The command is local operational proof only, not production certification or
-cutover approval.
+The previous local fixture runners that constructed Silver Iceberg tables are
+legacy compatibility tools and are not part of the supported main flow.
 
-# Local Gold WRITE retry check
+## Gold WRITE gate
 
-After the fixture runner creates `/tmp/gold-local-lineage.json`, enable WRITE
-for one command only with `GOLD_DIMENSIONAL_WRITE_ENABLED=true`. Repeat the
-same command with the same lineage; the second run should return
-`ALREADY_PUBLISHED`. This is local validation only.
+Gold `WRITE` remains a separate approval gate. Keep
+`GOLD_DIMENSIONAL_WRITE_ENABLED=false` for normal local validation; no local
+write/cutover command is documented here.
 
 ## Recovery contract checks
 

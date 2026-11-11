@@ -16,9 +16,10 @@
 
 Tiến hoá Gold thành dimensional Iceberg lakehouse:
 
-`Bronze -> verified Silver Iceberg -> Gold Dimensions/Facts -> derived marts`
+`Bronze -> verified Silver Parquet -> Gold Dimensions/Facts (Iceberg) -> derived marts`
 
-Local-only Gold validation remains bounded to the approved Iceberg/Nessie stack.
+Local-only Gold validation remains bounded to the approved Iceberg/Nessie stack;
+Nessie is used for Gold targets, not as the Silver source layer.
 Production routing, consumer cutover, and production certification are out of
 scope for this plan.
 
@@ -592,3 +593,20 @@ not perform external table/object writes.
   `git diff --check` **PASS**. Independent QA: **PASS**.
 - The broader local safe suite still has known Windows/Spark worker failures
   (`python3`/JAR access); these are environment failures outside this removal.
+
+#### Silver Parquet → Gold Iceberg route refactor (2026-11-11)
+
+- Approved route is now `Bronze -> verified Silver Parquet -> Gold Iceberg`.
+- The main Airflow DAG no longer runs Silver Iceberg migration, attestation,
+  reconciliation, or Iceberg quality operators.
+- Gold lineage now carries the completed Silver Parquet manifests. Because each
+  manifest is an incremental batch, Gold assembles all completed manifests per
+  table and deduplicates by business key and `updated_at` before transformation.
+- Gold remains the only supported Iceberg write target and keeps its existing
+  `DRY_RUN`/write guards.
+- Static/unit evidence: `344 passed, 78 deselected, 15 subtests passed` with
+  local bucket environment overrides; `compileall` and `git diff --check` pass.
+- Independent runtime certification and Gold WRITE cutover remain pending.
+- Independent QA verdict for this refactor: **PASS**. The bounded historical
+  manifest scope guard and its negative regression test were rechecked after
+  correction; no findings remain in the reviewed scope.
