@@ -4,8 +4,10 @@ The supported local path is `PostgreSQL (source) → Bronze (MinIO) → Silver (
 
 ## Safety defaults
 
-- `INGESTION_WRITE_ENABLED=false`, `LAKEHOUSE_WRITE_ENABLED=false`, and `GOLD_SNAPSHOT_WRITE_ENABLED=false` by default.
-- `GOLD_SOURCE_MODE=parquet_snapshot` remains the default. Any Gold `WRITE` requires its explicit snapshot guards.
+- `INGESTION_WRITE_ENABLED=false`, `LAKEHOUSE_WRITE_ENABLED=false`, and
+  `GOLD_DIMENSIONAL_ENABLED=false` by default.
+- Native dimensional Gold remains `DRY_RUN` by default; any Gold `WRITE`
+  requires `GOLD_DIMENSIONAL_WRITE_ENABLED=true` and bounded scope guards.
 - Do not remove PostgreSQL, MinIO, Nessie, or Airflow volumes as part of application cleanup.
 
 ## Compose services

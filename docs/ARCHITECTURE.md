@@ -19,7 +19,10 @@ Airflow orchestrates validation, Spark transformations, lineage attestation, and
 
 ## Runtime configuration
 
-`INGESTION_WRITE_ENABLED`, `LAKEHOUSE_WRITE_ENABLED`, and `GOLD_SNAPSHOT_WRITE_ENABLED` default to false. `GOLD_SOURCE_MODE=parquet_snapshot` is the default. Production cutover and operational certification require separate approval and evidence.
+`INGESTION_WRITE_ENABLED`, `LAKEHOUSE_WRITE_ENABLED`, and
+`GOLD_DIMENSIONAL_ENABLED` default to false; dimensional writes have a separate
+`GOLD_DIMENSIONAL_WRITE_ENABLED` guard. Production cutover and operational
+certification require separate approval and evidence.
 
 ## Repository map
 

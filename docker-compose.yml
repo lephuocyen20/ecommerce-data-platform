@@ -13,7 +13,6 @@ x-airflow-common: &airflow-common
     INGESTION_WRITE_ENABLED: "${INGESTION_WRITE_ENABLED:-false}"
     AIRFLOW_LOCAL_E2E_MODE: "${AIRFLOW_LOCAL_E2E_MODE:-}"
     LAKEHOUSE_WRITE_ENABLED: "${LAKEHOUSE_WRITE_ENABLED:-false}"
-    GOLD_SOURCE_MODE: "${GOLD_SOURCE_MODE:-parquet_snapshot}"
     GOLD_DIMENSIONAL_ENABLED: "${GOLD_DIMENSIONAL_ENABLED:-false}"
     GOLD_DIMENSIONAL_MODE: "${GOLD_DIMENSIONAL_MODE:-DRY_RUN}"
     GOLD_DIMENSIONAL_WRITE_ENABLED: "${GOLD_DIMENSIONAL_WRITE_ENABLED:-false}"
@@ -178,7 +177,6 @@ services:
     <<: *airflow-common
     environment:
       <<: *airflow-common-env
-      GOLD_SNAPSHOT_WRITE_ENABLED: "${GOLD_SNAPSHOT_WRITE_ENABLED:-false}"
     command: scheduler
     volumes:
     - ./airflow/dags:/opt/airflow/dags

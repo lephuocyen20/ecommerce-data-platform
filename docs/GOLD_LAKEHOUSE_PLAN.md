@@ -575,3 +575,20 @@ not perform external table/object writes.
   **PASS**.
 - Independent QA: **PASS**. No current Bronze → Silver → Gold entrypoint or
   roadmap behavior was affected.
+
+#### Gold legacy branch removal
+
+- Removed the retired Parquet/aggregate Gold branch: old runner, readers,
+  transformations, quality modules, Parquet storage/manifest/recovery stack,
+  fencing/ownership/preflight modules, old Airflow snapshot helpers, and their
+  dedicated tests.
+- Removed obsolete `GOLD_SOURCE_MODE` and `GOLD_SNAPSHOT_WRITE_ENABLED`
+  configuration, plus the two unused PostgreSQL fencing migrations/tables from
+  the authoring schema. No database migration or DROP was executed.
+- Kept native dimensional Iceberg Gold, run metadata, semantic reconciliation,
+  dataset contracts, bounded lineage, and current Airflow DAG/operator tasks.
+- Verification: `420 tests collected`, native static/config regression **64
+  passed**, compileall **PASS**, legacy-reference scan **PASS**, and
+  `git diff --check` **PASS**. Independent QA: **PASS**.
+- The broader local safe suite still has known Windows/Spark worker failures
+  (`python3`/JAR access); these are environment failures outside this removal.

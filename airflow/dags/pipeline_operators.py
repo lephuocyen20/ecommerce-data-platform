@@ -135,48 +135,6 @@ def create_silver_snapshot_operator(*, table_name, project_path, database_enviro
     )
 
 
-def create_gold_write_operator(*, dataset_name, source_task_id, project_path, source_mode="parquet_snapshot"):
-    """Create the guarded Gold write task for one Gold dataset."""
-    if source_mode not in {"parquet_snapshot", "iceberg_snapshot"}:
-        raise ValueError("Unsupported Gold source mode")
-    source_argument = "--source-lineage" if source_mode == "iceberg_snapshot" else "--source-snapshots"
-    return create_spark_submit_operator(
-        task_id=f"gold_{dataset_name}",
-        project_path=project_path,
-        script_path=f"{SPARK_WORKDIR}/gold/run_pipeline.py",
-        arguments=[
-            "--dataset", dataset_name,
-            source_argument,
-            "{{{{ ti.xcom_pull(task_ids='{}') }}}}".format(source_task_id),
-            "--mode", "WRITE",
-        ],
-        extra_environment={
-            "GOLD_SNAPSHOT_WRITE_ENABLED": os.environ.get(
-                "GOLD_SNAPSHOT_WRITE_ENABLED", ""
-            ),
-            "DB_HOST": "postgres",
-            "DB_PORT": "5432",
-            "DB_NAME": os.environ["DB_NAME"],
-            "DB_USER": os.environ["DB_USER"],
-            "DB_PASSWORD": os.environ["DB_PASSWORD"],
-        },
-        extra_mounts=[
-            Mount(
-                source=project_path + r"\ingestion",
-                target=f"{SPARK_WORKDIR}/ingestion",
-                type="bind",
-                read_only=True,
-            ),
-            Mount(
-                source=project_path + r"\lakehouse",
-                target=f"{SPARK_WORKDIR}/lakehouse",
-                type="bind",
-                read_only=True,
-            ),
-        ],
-    )
-
-
 def create_gold_dimensional_operator(*, source_task_id, project_path, mode="DRY_RUN"):
     """Create the single native dimensional graph writer.
 

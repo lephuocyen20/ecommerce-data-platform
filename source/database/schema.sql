@@ -6,7 +6,7 @@
 --   1. Source transactional tables trong public
 --   2. Metadata batch/watermark của incremental ingestion
 --   3. Raw Warehouse tables và checkpoint của Warehouse load
---   4. Fencing registry và attempt history cho Gold WRITE
+--   4. Runtime metadata cho native Gold WRITE
 --
 -- File này không tạo dbt staging/mart objects. `dbt build` sẽ tạo chúng sau
 -- khi Raw Warehouse load hoàn tất.
@@ -428,37 +428,6 @@ CREATE INDEX IF NOT EXISTS idx_loaded_batches_table_watermark
         table_name, end_timestamp DESC NULLS LAST, end_id DESC
     );
 
--- ============================================================================
--- 4. Fencing tables cho Gold WRITE
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS public.gold_execution_fencing (
-    dataset_name TEXT NOT NULL
-        CHECK (dataset_name ~ '^[a-z][a-z0-9_]*$'),
-    snapshot_id TEXT NOT NULL
-        CHECK (snapshot_id ~ '^gold_snap_[a-f0-9]{32}$'),
-    fencing_token BIGINT NOT NULL
-        CHECK (fencing_token > 0),
-    attempt_id TEXT NOT NULL
-        CHECK (attempt_id ~ '^attempt_[0-9a-f]{32}$'),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (dataset_name, snapshot_id)
-);
-
-CREATE TABLE IF NOT EXISTS public.gold_execution_attempt_history (
-    dataset_name TEXT NOT NULL
-        CHECK (dataset_name ~ '^[a-z][a-z0-9_]*$'),
-    snapshot_id TEXT NOT NULL
-        CHECK (snapshot_id ~ '^gold_snap_[a-f0-9]{32}$'),
-    attempt_id TEXT NOT NULL
-        CHECK (attempt_id ~ '^attempt_[0-9a-f]{32}$'),
-    fencing_token BIGINT NOT NULL
-        CHECK (fencing_token > 0),
-    allocated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (dataset_name, snapshot_id, attempt_id),
-    UNIQUE (dataset_name, snapshot_id, fencing_token)
-);
-
 COMMIT;
 
 -- ============================================================================
@@ -473,7 +442,6 @@ WHERE table_schema IN ('public', 'raw', 'warehouse')
   AND table_name IN (
       'customers', 'products', 'orders', 'order_items', 'payments',
       'shipments', 'ingestion_watermarks', 'ingestion_batches',
-      'loaded_batches', 'gold_execution_fencing',
-      'gold_execution_attempt_history'
+      'loaded_batches'
   )
 ORDER BY table_schema, table_name;

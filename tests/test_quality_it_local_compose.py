@@ -70,7 +70,6 @@ def test_local_e2e_selects_iceberg_for_all_silver_tables():
     assert "LAKEHOUSE_WRITE_ENABLED=true" in config
     for table in ("CUSTOMERS", "PRODUCTS", "ORDERS", "ORDER_ITEMS", "PAYMENTS", "SHIPMENTS"):
         assert f"{table}_SILVER_SOURCE=iceberg" in config
-    assert "GOLD_SNAPSHOT_WRITE_ENABLED=true" not in config
 
 
 def test_local_e2e_env_selects_write_mode_for_all_tables(monkeypatch):

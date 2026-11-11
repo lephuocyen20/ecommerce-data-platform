@@ -9,21 +9,12 @@ ROOT = Path(__file__).parents[1]
 
 def test_gold_task_module_does_not_import_spark_reader_at_parse_time():
     source = (ROOT / "airflow/dags/pipeline_tasks/gold.py").read_text(encoding="utf-8")
-    assert "gold.implementation.readers" not in source
     assert "pyspark" not in source
-
-
-def test_gold_lineage_helpers_keep_spark_modules_inside_runtime_function():
-    source = (ROOT / "airflow/dags/pipeline_gold.py").read_text(encoding="utf-8")
-    assert "from silver.snapshots.batch_discovery import" in source
-    prefix = source.split("def resolve_silver_snapshot_lineage", 1)[0]
-    assert "pyspark" not in prefix
 
 
 def test_gold_writer_uses_deterministic_task_id_for_xcom_pull():
     source = (ROOT / "airflow/dags/ecommerce_incremental_ingestion.py").read_text(encoding="utf-8")
     assert 'source_task_id = f"prepare_gold_sources_{name}"' not in source
-    assert "create_gold_write_operator" not in source
     assert "prepare_gold_sources_" not in source
 
 
@@ -43,9 +34,7 @@ def test_native_dimensional_group_has_one_writer_and_non_writing_confirmations()
     assert "create_gold_dimensional_confirmation_operator(table_name=table)" in dag_source
     assert '"gold_dimensional_write"' in operators
     assert 'task_id=f"confirm_gold_dimensional_{table_name}"' in operators
-    assert '"WAREHOUSE_DB_HOST"' not in operators[operators.index("def create_gold_dimensional_operator"):operators.index("def create_gold_dimensional_confirmation_operator")]
     assert "resolve_gold_dimensional_lineage_task" in dag_source
-    assert "resolve_gold_snapshot_lineage_task" not in dag_source
     assert "| tojson" in operators
     assert "for confirmation in confirmations:" in dag_source
     assert "dimensional_verify >> confirmation" in dag_source
