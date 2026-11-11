@@ -120,7 +120,7 @@ def test_create_and_merge_emit_only_allowlisted_ordered_sql():
         def sql(self, statement):
             self.sqls.append(statement)
             if statement.startswith("SHOW TBLPROPERTIES"):
-                return type("Rows", (), {"collect": lambda self: [("format-version", "2")]})()
+                return type("Rows", (), {"collect": lambda self: [("format-version", "2"), ("write.format.default", "parquet")]})()
         def table(self, identifier):
             fields = [type("Field", (), {"name": name, "dataType": type("Type", (), {"simpleString": lambda self, value=value: value})(), "nullable": nullable})()
                       for name, value, nullable in (("date_key", "bigint", True), ("calendar_date", "date", True), ("year", "int", True), ("month", "int", True), ("iso_week", "int", True))]
@@ -133,6 +133,7 @@ def test_create_and_merge_emit_only_allowlisted_ordered_sql():
     merge_table(spark, "dim_date", Frame())
     assert "CREATE NAMESPACE IF NOT EXISTS lakehouse.gold" in spark.sqls[0]
     assert "format-version'='2" in spark.sqls[1]
+    assert "write.format.default'='parquet" in spark.sqls[1]
     assert "MERGE INTO lakehouse.gold.dim_date" in spark.sqls[-1]
 
 
@@ -155,3 +156,13 @@ def test_existing_target_schema_or_format_drift_blocks_merge():
             return type("Rows", (), {"collect": lambda self: [("format-version", "1")]})()
     with pytest.raises(DimensionalWriteError, match="format-version"):
         validate_target_table(FormatDriftSpark(), "dim_date")
+
+    class ParquetPropertyDriftSpark:
+        def table(self, identifier):
+            fields = [type("Field", (), {"name": name, "dataType": type("Type", (), {"simpleString": lambda self, value=value: value})(), "nullable": nullable})()
+                      for name, value, nullable in (("date_key", "bigint", True), ("calendar_date", "date", True), ("year", "int", True), ("month", "int", True), ("iso_week", "int", True))]
+            return type("Table", (), {"schema": type("Schema", (), {"fields": fields})()})()
+        def sql(self, statement):
+            return type("Rows", (), {"collect": lambda self: [("format-version", "2")]})()
+    with pytest.raises(DimensionalWriteError, match="write.format.default"):
+        validate_target_table(ParquetPropertyDriftSpark(), "dim_date")

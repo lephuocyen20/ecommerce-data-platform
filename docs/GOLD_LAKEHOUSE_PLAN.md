@@ -1,5 +1,16 @@
 # Gold Lakehouse Development Plan
 
+## Session 2026-11-11: explicit Gold Parquet contract
+
+- Implementation: Gold Iceberg table creation now declares
+  `format-version=2` and `write.format.default=parquet`.
+- QA verdict: **PASS WITH WARNINGS**; focused writer tests passed (`11 passed`),
+  compileall and scoped diff checks passed.
+- Recovery, manifest, fence, MERGE, cutover and write guards are unchanged.
+- Runtime physical-file/Nessie snapshot verification remains pending a separate
+  bounded approval; this session did not perform external writes or destructive
+  Iceberg/object-store operations.
+
 ## Lifecycle semantic evidence
 
 - Status: **PASS WITH WARNINGS (code-level)**.

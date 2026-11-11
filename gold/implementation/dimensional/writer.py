@@ -20,6 +20,11 @@ from common.bounded_e2e_scope import TEST_BUCKET
 DRY_RUN = "DRY_RUN"
 WRITE = "WRITE"
 
+ICEBERG_TARGET_PROPERTIES = {
+    "format-version": "2",
+    "write.format.default": "parquet",
+}
+
 
 class DimensionalWriteError(ValueError):
     pass
@@ -45,9 +50,10 @@ def assert_write_allowed(mode):
 def create_target_table(spark, table, scope=None):
     identifier = _identifier(table, scope)
     spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {DIMENSIONAL_CATALOG}.{_namespace(scope)}")
+    properties = ", ".join(f"'{key}'='{value}'" for key, value in ICEBERG_TARGET_PROPERTIES.items())
     spark.sql(
         f"CREATE TABLE IF NOT EXISTS {identifier} ({TABLE_DDLS[table]}) USING iceberg "
-        "TBLPROPERTIES ('format-version'='2')"
+        f"TBLPROPERTIES ({properties})"
     )
     validate_target_table(spark, table)
 
@@ -60,8 +66,9 @@ def validate_target_table(spark, table, scope=None):
         raise DimensionalWriteError(f"Existing Iceberg target schema drift for {table}")
     rows = spark.sql(f"SHOW TBLPROPERTIES {identifier}").collect()
     properties = {row[0]: row[1] for row in rows}
-    if properties.get("format-version") != "2":
-        raise DimensionalWriteError(f"Existing Iceberg target format-version mismatch for {table}")
+    for property_name, expected_value in ICEBERG_TARGET_PROPERTIES.items():
+        if properties.get(property_name) != expected_value:
+            raise DimensionalWriteError(f"Existing Iceberg target {property_name} mismatch for {table}")
     return True
 
 
