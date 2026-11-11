@@ -14,11 +14,6 @@ env:
   DB_NAME: ecommerce_platform
   DB_USER: ecommerce_user
   DB_PASSWORD: ecommerce_pass
-  WAREHOUSE_DB_HOST: postgres
-  WAREHOUSE_DB_PORT: "5432"
-  WAREHOUSE_DB_NAME: ecommerce_platform
-  WAREHOUSE_DB_USER: ecommerce_user
-  WAREHOUSE_DB_PASSWORD: ecommerce_pass
   POSTGRES_PASSWORD: ecommerce_pass
   AIRFLOW_DB_HOST: postgres
   AIRFLOW_DB_PORT: "5432"
@@ -65,7 +60,7 @@ jobs:
           --mount type=bind,source="$GITHUB_WORKSPACE",target=/workspace,readonly
           --workdir /workspace
           ecommerce-pytest:ci
-          python -m compileall -q airflow/dags common gold ingestion lakehouse silver source transformation validation warehouse
+          python -m compileall -q airflow/dags common gold ingestion lakehouse silver source transformation validation
 
       - name: Validate Lakehouse Compose configuration
         run: docker compose -f docker-compose.yml -f spark/docker-compose.spark.yml config --quiet
@@ -78,8 +73,6 @@ jobs:
           --workdir /workspace
           --env PYTHONPATH
           --env DB_HOST --env DB_PORT --env DB_NAME --env DB_USER --env DB_PASSWORD
-          --env WAREHOUSE_DB_HOST --env WAREHOUSE_DB_PORT --env WAREHOUSE_DB_NAME
-          --env WAREHOUSE_DB_USER --env WAREHOUSE_DB_PASSWORD
           --env MINIO_ENDPOINT --env MINIO_ACCESS_KEY --env MINIO_SECRET_KEY --env BRONZE_BUCKET
           --env INGESTION_WRITE_ENABLED
           ecommerce-pytest:ci

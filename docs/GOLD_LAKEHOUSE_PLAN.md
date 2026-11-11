@@ -513,3 +513,22 @@ not perform external table/object writes.
   commits; no remote operation was performed.
 - Next step: review the five local commits, then approve push/merge separately
   if desired.
+
+#### Cleanup batch — retired Warehouse/dbt placeholders
+
+- Scope: remove the empty `warehouse/ecommerce_dbt` placeholder tree, remove
+  retired `WAREHOUSE_DB_*` CI inputs and `warehouse` compile/test references,
+  and align the root README and Lakehouse introduction with the supported
+  Bronze → Silver → Gold roadmap.
+- Preserved: `source/database/schema.sql` and migration `003` because legacy
+  checkpoint structures remain part of controlled backfill/reconciliation
+  compatibility; no database or object-storage state was changed.
+- Verification: `git diff --check` **PASS**; stale-reference search for the
+  removed placeholder/configuration paths **PASS**. Safe local regression ran
+  **557 passed, 180 deselected, 45 subtests passed**. Three unrelated
+  Windows/Spark environment-sensitive tests remain outside this cleanup scope
+  (Hadoop/JAR access and Spark lineage test assumptions).
+- QA: **PASS**. Independent review found no remaining cleanup-scope issue;
+  CI YAML, pytest collection, smoke-test compilation, E2E path collection and
+  `git diff --check` all passed. This cleanup does not advance a roadmap phase
+  or authorize production/cutover operations.

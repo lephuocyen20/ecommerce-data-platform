@@ -18,10 +18,9 @@ Gold is the canonical lakehouse analytical layer: conformed dimensions and facts
 
 Base monetary measures remain non-negative and are never physically removed.
 The single `signed_revenue` measure carries lifecycle direction: cancelled or
-deleted orders are negative, and refunded payments are negative. The dbt
-`fact_orders` and `fact_payments` models preserve their raw/base amounts and
-derive the same signed measure; no second discount/refund subtraction is
-performed.
+deleted orders are negative, and refunded payments are negative. Native Gold
+transformations preserve raw/base amounts and derive the same signed measure;
+no second discount/refund subtraction is performed.
 
 # Native Iceberg writer
 

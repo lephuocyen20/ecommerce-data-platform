@@ -1,8 +1,8 @@
 # Lakehouse Foundation
 
-The Lakehouse foundation runs alongside the existing Bronze, Silver, Warehouse,
-and dbt pipeline. Existing Parquet and warehouse flows are intentionally
-unchanged in this milestone.
+The Lakehouse foundation is the supported Bronze → Silver → Gold path. The
+former Raw Warehouse/dbt flow is retired; legacy checkpoint structures remain
+only for controlled backfill and reconciliation compatibility.
 
 ## Components
 
@@ -26,7 +26,7 @@ and an object-store access policy.
 ```powershell
 docker compose -f docker-compose.yml -f spark/docker-compose.spark.yml build spark
 docker compose -f docker-compose.yml -f spark/docker-compose.spark.yml up -d minio nessie spark
-docker exec ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/smoke_test.py
+docker exec ecommerce-spark /opt/spark/bin/spark-submit /opt/spark/work-dir/lakehouse/diagnostics/smoke_test.py
 docker exec ecommerce-spark python3 -m pytest -q -m e2e /opt/spark/work-dir/tests/test_lakehouse_e2e.py
 ```
 
