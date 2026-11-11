@@ -11,10 +11,16 @@ x-airflow-common: &airflow-common
     AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-change_this_local_password}
     AIRFLOW_SIMPLE_AUTH_PASSWORDS_FILE: /opt/airflow/auth/simple_auth_manager_passwords.json
     INGESTION_WRITE_ENABLED: "${INGESTION_WRITE_ENABLED:-false}"
+    AIRFLOW_LOCAL_E2E_MODE: "${AIRFLOW_LOCAL_E2E_MODE:-}"
     LAKEHOUSE_WRITE_ENABLED: "${LAKEHOUSE_WRITE_ENABLED:-false}"
     GOLD_SOURCE_MODE: "${GOLD_SOURCE_MODE:-parquet_snapshot}"
-    GOLD_ICEBERG_SOURCE_LINEAGE: "${GOLD_ICEBERG_SOURCE_LINEAGE:-}"
-    WAREHOUSE_WRITE_ENABLED: "${WAREHOUSE_WRITE_ENABLED:-false}"
+    GOLD_DIMENSIONAL_ENABLED: "${GOLD_DIMENSIONAL_ENABLED:-false}"
+    GOLD_DIMENSIONAL_MODE: "${GOLD_DIMENSIONAL_MODE:-DRY_RUN}"
+    GOLD_DIMENSIONAL_WRITE_ENABLED: "${GOLD_DIMENSIONAL_WRITE_ENABLED:-false}"
+    GOLD_DIM_DATE_START: "${GOLD_DIM_DATE_START:-2020-01-01}"
+    GOLD_DIM_DATE_END: "${GOLD_DIM_DATE_END:-2035-12-31}"
+    NESSIE_URI: "${NESSIE_URI:-http://nessie:19120/api/v2}"
+    NESSIE_REF: "${NESSIE_REF:-main}"
     CUSTOMERS_SILVER_SOURCE: "${CUSTOMERS_SILVER_SOURCE:-parquet}"
     CUSTOMERS_ICEBERG_CUTOVER_ENABLED: "${CUSTOMERS_ICEBERG_CUTOVER_ENABLED:-false}"
     PRODUCTS_SILVER_SOURCE: "${PRODUCTS_SILVER_SOURCE:-parquet}"
@@ -41,11 +47,17 @@ x-airflow-common: &airflow-common
     MINIO_ENDPOINT: ${MINIO_DOCKER_ENDPOINT:-minio:9000}
     MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
     MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
-    BRONZE_BUCKET: ${BRONZE_BUCKET}
+    BRONZE_BUCKET: ${BRONZE_BUCKET:-ecommerce-quality-it}
+    LAKEHOUSE_E2E_APPROVED: "${LAKEHOUSE_E2E_APPROVED:-0}"
+    LAKEHOUSE_E2E_TEST_BUCKET: "${LAKEHOUSE_E2E_TEST_BUCKET:-}"
+    LAKEHOUSE_E2E_RUN_ID: "${LAKEHOUSE_E2E_RUN_ID:-}"
+    LAKEHOUSE_E2E_PREFIX: "${LAKEHOUSE_E2E_PREFIX:-}"
+    LAKEHOUSE_E2E_WAREHOUSE: "${LAKEHOUSE_E2E_WAREHOUSE:-}"
+    LAKEHOUSE_E2E_NESSIE_REF: "${LAKEHOUSE_E2E_NESSIE_REF:-}"
+    LAKEHOUSE_E2E_SILVER_NAMESPACE: "${LAKEHOUSE_E2E_SILVER_NAMESPACE:-}"
     AIRFLOW_DOCKER_PROJECT_PATH: "${AIRFLOW_DOCKER_PROJECT_PATH:-${PWD}}"
     AIRFLOW_DOCKER_NETWORK: "${AIRFLOW_DOCKER_NETWORK:-${COMPOSE_PROJECT_NAME:-ecommerce-data-platform}_default}"
     SPARK_IMAGE: "${SPARK_IMAGE:-ecommerce-spark:3.5.6}"
-    DBT_RUNNER_IMAGE: "${DBT_RUNNER_IMAGE:-ecommerce-data-platform-dbt-runner:latest}"
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
@@ -129,26 +141,6 @@ services:
     depends_on:
       - minio
 
-  dbt-runner:
-    build:
-      context: .
-      dockerfile: warehouse/dbt.Dockerfile
-    environment:
-      DBT_PROFILES_DIR: /app/profiles
-      DBT_HOST: postgres
-      DBT_PORT: "5432"
-      DBT_NAME: ${DB_NAME:-ecommerce_platform}
-      DBT_USER: ${DB_USER}
-      DBT_PASSWORD: ${DB_PASSWORD}
-    volumes:
-      - ./warehouse/ecommerce_dbt:/app
-      - ./warehouse/dbt_profiles:/app/profiles:ro
-    working_dir: /app
-    depends_on:
-      - postgres
-    profiles:
-      - dbt
-
   airflow-init:
     <<: *airflow-common
     user: "0:0"
@@ -186,13 +178,7 @@ services:
     <<: *airflow-common
     environment:
       <<: *airflow-common-env
-      WAREHOUSE_WRITE_ENABLED: "${WAREHOUSE_WRITE_ENABLED:-false}"
       GOLD_SNAPSHOT_WRITE_ENABLED: "${GOLD_SNAPSHOT_WRITE_ENABLED:-false}"
-      WAREHOUSE_DB_HOST: postgres
-      WAREHOUSE_DB_PORT: ${DB_PORT}
-      WAREHOUSE_DB_NAME: ${DB_NAME}
-      WAREHOUSE_DB_USER: ${DB_USER}
-      WAREHOUSE_DB_PASSWORD: ${DB_PASSWORD}
     command: scheduler
     volumes:
     - ./airflow/dags:/opt/airflow/dags
@@ -210,7 +196,6 @@ services:
     - ./transformation:/opt/airflow/project/transformation:ro
     - /var/run/docker.sock:/var/run/docker.sock
     - ./staging:/opt/airflow/project/staging
-    - ./warehouse:/opt/airflow/project/warehouse:ro
     depends_on:
       airflow-init:
         condition: service_completed_successfully
@@ -220,11 +205,6 @@ services:
     <<: *airflow-common
     environment:
       <<: *airflow-common-env
-      WAREHOUSE_DB_HOST: postgres
-      WAREHOUSE_DB_PORT: ${DB_PORT}
-      WAREHOUSE_DB_NAME: ${DB_NAME}
-      WAREHOUSE_DB_USER: ${DB_USER}
-      WAREHOUSE_DB_PASSWORD: ${DB_PASSWORD}
     command: dag-processor
     volumes:
     - ./airflow/dags:/opt/airflow/dags:ro
