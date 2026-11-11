@@ -16,3 +16,14 @@ def decide_gold_snapshot_gate(pipeline_result: dict, *, write_enabled: bool, lin
     if lineage_task_id not in {"resolve_gold_snapshot_lineage", "resolve_gold_iceberg_lineage"}:
         raise ValueError("Invalid Gold lineage branch target")
     return lineage_task_id
+
+
+def decide_gold_dimensional_gate(pipeline_result: dict, *, enabled: bool):
+    """Own the native dimensional branch; it never depends on aggregate Gold."""
+    if not enabled:
+        return "skip_gold_dimensional"
+    if not isinstance(pipeline_result, dict) or pipeline_result.get("status") != "PASS":
+        raise ValueError("Dimensional Gold requires a successful Silver pipeline summary")
+    if pipeline_result.get("mode") != "WRITE" or not isinstance(pipeline_result.get("results"), dict):
+        raise ValueError("Dimensional Gold requires verified Silver WRITE results")
+    return "resolve_gold_dimensional_lineage"

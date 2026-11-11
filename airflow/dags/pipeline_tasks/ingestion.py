@@ -4,14 +4,26 @@ import logging
 import sys
 from datetime import datetime
 
-from airflow.sdk import get_current_context, task
+try:
+    from airflow.sdk import get_current_context, task
+except ImportError:  # Airflow 2.x compatibility for local import tests
+    try:
+        from airflow.decorators import get_current_context, task
+    except ImportError:
+        def get_current_context():
+            raise RuntimeError("Airflow runtime context is unavailable")
+        def task(*_args, **_kwargs):
+            return lambda fn: fn
 
 AIRFLOW_PROJECT_PATH = "/opt/airflow/project"
 if AIRFLOW_PROJECT_PATH not in sys.path:
     sys.path.insert(0, AIRFLOW_PROJECT_PATH)
 
 from common.runtime_policy import DRY_RUN, WRITE, require_feature_enabled
-from pipeline_config import validate_incremental_run_config
+try:
+    from pipeline_config import validate_incremental_run_config
+except ImportError:
+    from airflow.dags.pipeline_config import validate_incremental_run_config
 
 
 STAGING_ROOT = "/opt/airflow/project/staging"
