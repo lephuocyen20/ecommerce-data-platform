@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 from unittest.mock import MagicMock, patch
 
 from ingestion.incremental import orchestrator
@@ -9,7 +9,7 @@ def test_tx1_failure_rolls_back_without_starting_tx2():
     conn.autocommit = False
 
     cursor = conn.cursor.return_value.__enter__.return_value
-    cursor.fetchone.return_value = ("ecommerce_test",)
+    cursor.fetchone.return_value = (orchestrator.EXPECTED_DB_NAME,)
 
     with (
         patch.object(
@@ -49,12 +49,12 @@ def test_tx2_failure_rolls_back_after_tx1_commit(tmp_path):
     tx1 = MagicMock()
     tx1.autocommit = False
     tx1_cursor = tx1.cursor.return_value.__enter__.return_value
-    tx1_cursor.fetchone.return_value = ("ecommerce_test",)
+    tx1_cursor.fetchone.return_value = (orchestrator.EXPECTED_DB_NAME,)
 
     tx2 = MagicMock()
     tx2.autocommit = False
     tx2_cursor = tx2.cursor.return_value.__enter__.return_value
-    tx2_cursor.fetchone.return_value = ("ecommerce_test",)
+    tx2_cursor.fetchone.return_value = (orchestrator.EXPECTED_DB_NAME,)
 
     pending_result = {
         "action": "NEW_BATCH",
@@ -109,7 +109,7 @@ def test_tx1_no_data_rolls_back_without_starting_tx2():
     conn.autocommit = False
 
     cursor = conn.cursor.return_value.__enter__.return_value
-    cursor.fetchone.return_value = ("ecommerce_test",)
+    cursor.fetchone.return_value = (orchestrator.EXPECTED_DB_NAME,)
 
     no_data_result = {
         "action": "NEW_BATCH",
@@ -157,7 +157,7 @@ def test_tx1_recovery_commits_without_starting_tx2(action):
     conn.autocommit = False
 
     cursor = conn.cursor.return_value.__enter__.return_value
-    cursor.fetchone.return_value = ("ecommerce_test",)
+    cursor.fetchone.return_value = (orchestrator.EXPECTED_DB_NAME,)
 
     recovery_result = {
         "action": action,
@@ -216,13 +216,13 @@ def test_tx2_success_commits_checkpoint(
     tx1 = MagicMock()
     tx1.autocommit = False
     tx1.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     tx2 = MagicMock()
     tx2.autocommit = False
     tx2.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     pending_result = {
@@ -324,13 +324,13 @@ def test_tx2_already_committed_verifies_checkpoint(tmp_path):
     tx1 = MagicMock()
     tx1.autocommit = False
     tx1.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     tx2 = MagicMock()
     tx2.autocommit = False
     tx2.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     pending_result = {
@@ -415,13 +415,13 @@ def test_tx2_already_committed_rejects_checkpoint_mismatch(tmp_path):
     tx1 = MagicMock()
     tx1.autocommit = False
     tx1.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     tx2 = MagicMock()
     tx2.autocommit = False
     tx2.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     pending_result = {
@@ -543,13 +543,13 @@ def test_tx2_missing_metadata_rolls_back(tmp_path):
     tx1 = MagicMock()
     tx1.autocommit = False
     tx1.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     tx2 = MagicMock()
     tx2.autocommit = False
     tx2.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     pending_result = {
@@ -637,13 +637,13 @@ def test_tx2_rejects_metadata_mismatch(
     tx1 = MagicMock()
     tx1.autocommit = False
     tx1.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     tx2 = MagicMock()
     tx2.autocommit = False
     tx2.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     pending_result = {
@@ -744,13 +744,13 @@ def test_tx2_rejects_recovery_state_mismatch(
     tx1 = MagicMock()
     tx1.autocommit = False
     tx1.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     tx2 = MagicMock()
     tx2.autocommit = False
     tx2.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     pending_result = {
@@ -831,13 +831,13 @@ def test_tx2_blocks_recovery_when_failed_batch_exists(tmp_path):
     tx1 = MagicMock()
     tx1.autocommit = False
     tx1.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     tx2 = MagicMock()
     tx2.autocommit = False
     tx2.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     pending_result = {
@@ -937,13 +937,13 @@ def test_tx2_rejects_recovery_result_mismatch(
     tx1 = MagicMock()
     tx1.autocommit = False
     tx1.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     tx2 = MagicMock()
     tx2.autocommit = False
     tx2.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     pending_result = {
@@ -1036,13 +1036,13 @@ def test_tx2_rolls_back_when_advisory_lock_is_busy(tmp_path):
     tx1 = MagicMock()
     tx1.autocommit = False
     tx1.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     tx2 = MagicMock()
     tx2.autocommit = False
     tx2.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     pending_result = {
@@ -1113,13 +1113,13 @@ def test_tx2_rejects_unexpected_batch_status(tmp_path):
     tx1 = MagicMock()
     tx1.autocommit = False
     tx1.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     tx2 = MagicMock()
     tx2.autocommit = False
     tx2.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     pending_result = {
@@ -1194,7 +1194,7 @@ def test_tx2_rejects_unexpected_batch_status(tmp_path):
     [
         ("postgres", False, "Write blocked for database: postgres"),
         ("ecommerce_prod", False, "Write blocked for database: ecommerce_prod"),
-        ("ecommerce_test", True, "Autocommit must be disabled"),
+        (orchestrator.EXPECTED_DB_NAME, True, "Autocommit must be disabled"),
     ],
     ids=[
         "postgres-database",
@@ -1215,7 +1215,7 @@ def test_tx2_rejects_unsafe_database_connection(
     tx1 = MagicMock()
     tx1.autocommit = False
     tx1.cursor.return_value.__enter__.return_value.fetchone.return_value = (
-        "ecommerce_test",
+        orchestrator.EXPECTED_DB_NAME,
     )
 
     tx2 = MagicMock()

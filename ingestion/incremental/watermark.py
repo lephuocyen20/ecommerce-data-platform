@@ -13,7 +13,11 @@ def get_watermark(conn, table_name):
                 watermark_type,
                 last_timestamp,
                 last_id,
-                last_batch_id
+                last_batch_id,
+                replay_cursor_timestamp,
+                replay_cursor_id,
+                replay_upper_timestamp
+                ,replay_upper_id
             FROM public.ingestion_watermarks
             WHERE table_name = %s
             """,
@@ -28,10 +32,14 @@ def get_watermark(conn, table_name):
             "last_timestamp": None,
             "last_id": 0,
             "last_batch_id": None,
+            "replay_cursor_timestamp": None,
+            "replay_cursor_id": 0,
+            "replay_upper_timestamp": None,
+            "replay_upper_id": 0,
             "is_initial_load": True,
         }
 
-    watermark_type, last_timestamp, last_id, last_batch_id = row
+    watermark_type, last_timestamp, last_id, last_batch_id, *replay = row
     if watermark_type != config["watermark_type"]:
         raise RuntimeError(
             f"Watermark type mismatch for {table_name}: "
@@ -44,6 +52,10 @@ def get_watermark(conn, table_name):
         "last_timestamp": last_timestamp,
         "last_id": last_id,
         "last_batch_id": last_batch_id,
+        "replay_cursor_timestamp": replay[0] if len(replay) > 0 else None,
+        "replay_cursor_id": replay[1] if len(replay) > 1 and replay[1] is not None else 0,
+        "replay_upper_timestamp": replay[2] if len(replay) > 2 else None,
+        "replay_upper_id": replay[3] if len(replay) > 3 and replay[3] is not None else 0,
         "is_initial_load": False,
     }
 
@@ -73,6 +85,25 @@ def get_locked_watermark(conn, table_name):
     if watermark["watermark_type"] != TABLE_CONFIG[table_name]["watermark_type"]:
         raise ValueError(f"Watermark type mismatch: {table_name}")
     return watermark
+
+
+def clear_replay_state(conn, table_name):
+    """Clear an exhausted replay window in the caller-owned transaction."""
+    if conn.autocommit:
+        raise ValueError("Autocommit must be disabled")
+    get_table_config(table_name)
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """UPDATE public.ingestion_watermarks
+               SET replay_cursor_timestamp = NULL,
+                   replay_cursor_id = 0,
+                   replay_upper_timestamp = NULL,
+                   replay_upper_id = 0,
+                   updated_at = CURRENT_TIMESTAMP
+               WHERE table_name = %s""",
+            (table_name,),
+        )
+    return True
 
 
 def commit_uploaded_batch(conn, client, batch_id):
@@ -107,19 +138,26 @@ def commit_uploaded_batch(conn, client, batch_id):
             """
             INSERT INTO public.ingestion_watermarks (
                 table_name, watermark_type, last_timestamp, last_id, last_batch_id,
+                replay_cursor_timestamp, replay_cursor_id, replay_upper_timestamp, replay_upper_id,
                 updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
             ON CONFLICT (table_name)
             DO UPDATE SET
                 watermark_type = EXCLUDED.watermark_type,
                 last_timestamp = EXCLUDED.last_timestamp,
                 last_id = EXCLUDED.last_id,
                 last_batch_id = EXCLUDED.last_batch_id,
+                replay_cursor_timestamp = EXCLUDED.replay_cursor_timestamp,
+                replay_cursor_id = EXCLUDED.replay_cursor_id,
+                replay_upper_timestamp = EXCLUDED.replay_upper_timestamp,
+                replay_upper_id = EXCLUDED.replay_upper_id,
                 updated_at = CURRENT_TIMESTAMP
             """,
-            (table_name, metadata["watermark_type"], metadata["end_timestamp"],
-             metadata["end_id"], batch_id),
+            (table_name, metadata["watermark_type"], metadata.get("checkpoint_timestamp", metadata["end_timestamp"]),
+             metadata.get("checkpoint_id", metadata["end_id"]), batch_id,
+             metadata.get("replay_cursor_timestamp"), metadata.get("replay_cursor_id", 0),
+             metadata.get("replay_upper_timestamp"), metadata.get("replay_upper_id", 0)),
         )
         cursor.execute(
             """
@@ -134,11 +172,13 @@ def commit_uploaded_batch(conn, client, batch_id):
             raise RuntimeError("Batch status changed before COMMIT")
     return {
         "batch_id": batch_id, "table_name": table_name, "status": "COMMITTED",
-        "last_timestamp": metadata["end_timestamp"], "last_id": metadata["end_id"],
+        "last_timestamp": metadata.get("checkpoint_timestamp", metadata["end_timestamp"]),
+        "last_id": metadata.get("checkpoint_id", metadata["end_id"]),
     }
 
 __all__ = [
     "commit_uploaded_batch",
+    "clear_replay_state",
     "get_locked_watermark",
     "get_watermark",
     "watermark_matches_batch_start",

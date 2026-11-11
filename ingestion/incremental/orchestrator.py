@@ -32,6 +32,7 @@ from ingestion.incremental.minio_storage import (
     verify_minio_object,
 )
 from ingestion.incremental.watermark import (
+    clear_replay_state,
     commit_uploaded_batch,
     get_locked_watermark,
     get_watermark,
@@ -169,6 +170,8 @@ def prepare_pending_batch(
     )
 
     if batch["row_count"] == 0:
+        if watermark.get("replay_upper_timestamp") is not None:
+            clear_replay_state(conn, table_name)
         return None
 
     # 5. Build CSV and metadata

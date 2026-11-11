@@ -53,23 +53,27 @@ def prepare_batch_metadata(table_name, watermark, batch, csv_content):
     object_key = build_object_key(table_name, batch_id)
     checksum = hashlib.sha256(csv_content.encode("utf-8")).hexdigest()
 
-    return {
+    metadata = {
         "batch_id": batch_id,
         "table_name": table_name,
         "watermark_type": config["watermark_type"],
         "start_timestamp": watermark["last_timestamp"],
         "start_id": watermark["last_id"],
         "end_timestamp": (
-            last_row[config["watermark_column"]]
+            batch.get("checkpoint_timestamp", last_row[config["watermark_column"]])
             if config["watermark_type"] == "TIMESTAMP"
             else None
         ),
-        "end_id": last_row[config["primary_key"]],
+        "end_id": batch.get("checkpoint_id", last_row[config["primary_key"]]),
         "row_count": batch["row_count"],
         "object_key": object_key,
         "checksum_sha256": checksum,
         "status": "PENDING",
     }
+    for field in ("checkpoint_timestamp", "checkpoint_id", "replay_cursor_timestamp", "replay_cursor_id", "replay_upper_timestamp", "replay_upper_id"):
+        if field in batch:
+            metadata[field] = batch[field]
+    return metadata
 
 
 def stage_batch_csv(metadata, csv_content, staging_root="staging"):
