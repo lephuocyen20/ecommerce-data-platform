@@ -63,13 +63,12 @@ def test_root_compose_passes_native_gold_and_nessie_env_with_safe_defaults():
     assert 'GOLD_DIMENSIONAL_WRITE_ENABLED:-false' in root
 
 
-def test_local_e2e_selects_iceberg_for_all_silver_tables():
+def test_local_e2e_selects_parquet_for_all_silver_tables():
     config = (ROOT / ".env.quality-it.local.example").read_text(encoding="utf-8")
     assert "INGESTION_WRITE_ENABLED=true" in config
     assert "AIRFLOW_LOCAL_E2E_MODE=WRITE" in config
-    assert "LAKEHOUSE_WRITE_ENABLED=true" in config
     for table in ("CUSTOMERS", "PRODUCTS", "ORDERS", "ORDER_ITEMS", "PAYMENTS", "SHIPMENTS"):
-        assert f"{table}_SILVER_SOURCE=iceberg" in config
+        assert f"{table}_SILVER_SOURCE=parquet" in config
 
 
 def test_local_e2e_env_selects_write_mode_for_all_tables(monkeypatch):

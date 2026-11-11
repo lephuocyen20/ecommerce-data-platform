@@ -39,20 +39,15 @@ def test_native_dimensional_group_has_one_writer_and_non_writing_confirmations()
     assert "for confirmation in confirmations:" in dag_source
     assert "dimensional_verify >> confirmation" in dag_source
     assert "dimensional_skip >> confirmation" not in dag_source
-    assert "migration >> artifact" in dag_source
-    assert "attestation >> artifact" in dag_source
-    assert "reconcile >> artifact" in dag_source
-    assert "quality >> artifact" in dag_source
     assert "resolve_gold_dimensional_lineage_task(dimensional_artifacts)" in dag_source
     gold_tasks = (ROOT / "airflow/dags/pipeline_tasks/gold.py").read_text(encoding="utf-8")
-    assert 'artifact = result.get("dimensional_artifact") if "dimensional_artifact" in result else result' in gold_tasks
-    assert "create_lakehouse_migration_operator" in dag_source
-    assert "create_lakehouse_attestation_operator" in dag_source
-    assert "create_lakehouse_reconcile_operator" in dag_source
-    assert "create_lakehouse_quality_operator" in dag_source
-    assert "build_dimensional_artifact_task" in dag_source
-    assert "table, attestation.output, reconcile.output, quality.output" in dag_source
-    assert "(table, attestation, reconcile, quality)" not in dag_source
+    assert "build_dimensional_parquet_artifact_task" in dag_source
+    assert "artifacts[table] = artifact" in gold_tasks
+    assert "create_lakehouse_migration_operator" not in dag_source
+    assert "create_lakehouse_attestation_operator" not in dag_source
+    assert "create_lakehouse_reconcile_operator" not in dag_source
+    assert "create_lakehouse_quality_operator" not in dag_source
+    assert "build_dimensional_artifact_task" not in dag_source
     assert "GOLD_DIMENSIONAL_SOURCE_LINEAGE" not in dag_source
     assert 'os.environ.get("GOLD_DIM_DATE_START"' in operators
     assert 'os.environ.get("GOLD_DIM_DATE_END"' in operators
@@ -65,7 +60,7 @@ def test_native_dimensional_group_has_one_writer_and_non_writing_confirmations()
     assert "GOLD_RUN_METADATA_PERSIST_ENABLED" in operators
     assert '"DB_HOST"' in operators
     assert '"GOLD_RUN_ID"' in operators
-    assert operators.count("xcom_all=True") >= 3
+    assert "xcom_all=True" not in operators
     assert "[dimensional_writer, dimensional_skip] >> confirmations" not in dag_source
 
 

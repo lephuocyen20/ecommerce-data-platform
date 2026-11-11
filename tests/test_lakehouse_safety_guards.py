@@ -67,32 +67,6 @@ def test_equal_watermark_with_same_payload_keeps_strict_newer_merge(monkeypatch)
     assert any("WHEN MATCHED AND s._source_updated_at > t._source_updated_at" in query for query in spark.queries)
 
 
-def _dependency_policy():
-    path = Path(__file__).parents[1] / "airflow/dags/lakehouse_dependencies.py"
-    spec = importlib.util.spec_from_file_location("lakehouse_dependencies_for_test", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_parent_completion_contract_allows_noop_but_never_a_failed_parent():
-    policy = _dependency_policy()
-
-    assert policy.PARENT_COMPLETION_TRIGGER_RULE == "none_failed_min_one_success"
-    assert policy.parent_completion_permits_child(("success", "skipped"))
-    assert policy.parent_completion_permits_child(("skipped", "success"))
-    assert not policy.parent_completion_permits_child(("skipped", "skipped"))
-    assert not policy.parent_completion_permits_child(("failed", "skipped"))
-    assert not policy.parent_completion_permits_child(("upstream_failed", "success"))
-
-
-def test_unselected_parent_is_a_successful_noop_for_fk_completion():
-    # ingest_incremental now returns NO_DATA instead of task-level SKIPPED;
-    # the branch skip task therefore executes successfully.
-    policy = _dependency_policy()
-    assert policy.parent_completion_permits_child(("success", "skipped"))
-
-
 def test_partial_dry_run_unselected_table_uses_existing_silver_skip_contract():
     from airflow.dags.pipeline_tasks.ingestion import (
         build_unselected_ingestion_result,
@@ -115,70 +89,7 @@ def test_partial_write_unselected_table_uses_existing_silver_skip_contract():
     }
 
 
-def test_declared_fk_parent_graph_is_complete_and_deterministic():
-    graph = {
-        "orders": ("customers",),
-        "order_items": ("orders", "products"),
-        "payments": ("orders",),
-        "shipments": ("orders",),
-    }
-    assert _dependency_policy().foreign_key_parents() == graph
-
-    from lakehouse.models.spec import SPECS
-
-    spec_graph = {
-        name: tuple(sorted(set((spec.foreign_keys or {}).values())))
-        for name, spec in SPECS.items()
-        if spec.foreign_keys
-    }
-    assert graph == spec_graph
-
-
-def test_completion_operator_uses_the_noop_safe_trigger_rule(monkeypatch):
-    policy = _dependency_policy()
-    monkeypatch.setitem(sys.modules, "lakehouse_dependencies", policy)
-
-    class _EmptyOperator:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-    docker_operator = types.ModuleType("airflow.providers.docker.operators.docker")
-    docker_operator.DockerOperator = object
-    empty_operator = types.ModuleType("airflow.providers.standard.operators.empty")
-    empty_operator.EmptyOperator = _EmptyOperator
-    docker_types = types.ModuleType("docker.types")
-    docker_types.Mount = object
-    for name, module in {
-        "airflow": types.ModuleType("airflow"),
-        "airflow.providers": types.ModuleType("airflow.providers"),
-        "airflow.providers.docker": types.ModuleType("airflow.providers.docker"),
-        "airflow.providers.docker.operators": types.ModuleType("airflow.providers.docker.operators"),
-        "airflow.providers.docker.operators.docker": docker_operator,
-        "airflow.providers.standard": types.ModuleType("airflow.providers.standard"),
-        "airflow.providers.standard.operators": types.ModuleType("airflow.providers.standard.operators"),
-        "airflow.providers.standard.operators.empty": empty_operator,
-        "docker": types.ModuleType("docker"),
-        "docker.types": docker_types,
-    }.items():
-        monkeypatch.setitem(sys.modules, name, module)
-
-    path = Path(__file__).parents[1] / "airflow/dags/pipeline_operators.py"
-    spec = importlib.util.spec_from_file_location("pipeline_operators_for_test", path)
-    operators = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(operators)
-
-    task = operators.create_lakehouse_completion_operator(table_name="orders")
-    assert task.kwargs == {
-        "task_id": "iceberg_orders_completion",
-        "trigger_rule": "none_failed_min_one_success",
-        "retries": 0,
-    }
-
-
 def test_spark_factory_uses_bounded_retry_and_timeout(monkeypatch):
-    policy = _dependency_policy()
-    monkeypatch.setitem(sys.modules, "lakehouse_dependencies", policy)
-
     class _DockerOperator:
         def __init__(self, **kwargs): self.kwargs = kwargs
     class _Mount:
