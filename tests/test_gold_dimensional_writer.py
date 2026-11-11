@@ -1,6 +1,7 @@
 import pytest
 
 from gold.implementation.dimensional.manifest import DimensionalManifestError, build_graph_manifest, build_graph_run_manifest, graph_manifest_key, build_table_manifest
+from gold.implementation.dimensional.contracts import DIMENSIONAL_SOURCE_TABLES, WRITE_ORDER
 from gold.implementation.dimensional.writer import (
     DRY_RUN, WRITE, DimensionalWriteError, assert_write_allowed, create_target_table,
     merge_table, recovery_state, run_dimensional_graph, validate_target_table,
@@ -8,7 +9,7 @@ from gold.implementation.dimensional.writer import (
 
 
 def dimensional_lineage():
-    tables = ("customers", "order_items", "orders", "products")
+    tables = DIMENSIONAL_SOURCE_TABLES
     sources = {}
     for offset, table in enumerate(tables, start=1):
         sources[table] = {
@@ -23,15 +24,26 @@ def dimensional_lineage():
 def test_graph_identity_includes_explicit_date_range_and_table_manifest_is_stable():
     lineage = dimensional_lineage()
     graph = build_graph_manifest(lineage, dim_date_start="2026-01-01", dim_date_end="2026-12-31")
+    assert graph["source_contract"]["delete"]["physical_delete"] is False
+    assert graph["source_contract"]["late_data"]["mode"] == "overlap_reprocess"
     changed = build_graph_manifest(lineage, dim_date_start="2026-01-02", dim_date_end="2026-12-31")
     assert graph["identity"] != changed["identity"]
     manifest = build_table_manifest(graph, table="fact_orders", snapshot_id=123, quality={"status": "PASS", "row_count": 2})
     assert manifest["graph_identity"] == graph["identity"]
     assert len(manifest["identity"]) == 64
     manifests = [build_table_manifest(graph, table=table, snapshot_id=index, quality={"status": "PASS", "row_count": index})
-                 for index, table in enumerate(("dim_date", "dim_customer", "dim_product", "fact_orders"), start=1)]
-    assert build_graph_run_manifest(graph, manifests)["outputs"][-1]["table"] == "fact_orders"
+                 for index, table in enumerate(WRITE_ORDER, start=1)]
+    assert build_graph_run_manifest(graph, manifests)["outputs"][-1]["table"] == "fact_shipments"
     assert graph_manifest_key(graph["identity"]).endswith(f"/{graph['identity']}.json")
+
+
+def test_graph_run_manifest_rejects_duplicate_table_entries():
+    lineage = dimensional_lineage()
+    graph = build_graph_manifest(lineage, dim_date_start="2026-01-01", dim_date_end="2026-12-31")
+    manifests = [build_table_manifest(graph, table=table, snapshot_id=index, quality={"status": "PASS"}) for index, table in enumerate(WRITE_ORDER, start=1)]
+    manifests[-1] = manifests[0]
+    with pytest.raises(DimensionalManifestError, match="every table manifest"):
+        build_graph_run_manifest(graph, manifests)
 
 
 def test_write_feature_flag_defaults_to_off(monkeypatch):
@@ -41,6 +53,13 @@ def test_write_feature_flag_defaults_to_off(monkeypatch):
         assert_write_allowed(WRITE)
     monkeypatch.setenv("GOLD_DIMENSIONAL_WRITE_ENABLED", "true")
     assert_write_allowed(WRITE)
+
+
+def test_shared_bucket_requires_explicit_bounded_scope(monkeypatch):
+    monkeypatch.setenv("GOLD_DIMENSIONAL_WRITE_ENABLED", "true")
+    with pytest.raises(DimensionalWriteError, match="bounded E2E scope"):
+        run_dimensional_graph(None, object(), "ecommerce-data-lake", {},
+                              dim_date_start="2026-01-01", dim_date_end="2026-01-01", mode=WRITE)
 
 
 def test_recovery_never_treats_partial_table_publication_as_complete():

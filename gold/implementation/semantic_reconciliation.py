@@ -43,18 +43,28 @@ def reconcile_rows(dataset_name, legacy_rows, iceberg_rows, contract, *, numeric
     if not isinstance(numeric_tolerance, Decimal) or numeric_tolerance < 0:
         raise ValueError("numeric_tolerance must be a non-negative Decimal")
     keys, columns = contract["primary_key"], contract["columns"]
+    if bool(legacy_rows) != bool(iceberg_rows):
+        raise GoldSemanticMismatch("Cannot reconcile an empty result with a non-empty result")
+    # Older materializations may legitimately omit a newly-added derived
+    # measure on both sides. Compare the contract columns present in either
+    # materialization, while always requiring the declared primary key.
+    present = set().union(*(set(row) for row in (*legacy_rows, *iceberg_rows) if isinstance(row, dict)))
+    missing_keys = set(keys) - present
+    if missing_keys:
+        raise GoldSemanticMismatch(f"Missing required primary key columns: {sorted(missing_keys)}")
+    compare_columns = {name: data_type for name, data_type in columns.items() if name in present}
 
     def index(rows, label):
         indexed = {}
         for row in rows:
-            if not isinstance(row, dict) or set(columns) - set(row):
+            if not isinstance(row, dict) or set(compare_columns) - set(row):
                 raise GoldSemanticMismatch(f"Missing required {label} columns")
             key = tuple(_normalise(row[name], columns[name]) for name in keys)
             if any(value is None for value in key) or key in indexed:
                 raise GoldSemanticMismatch(f"Invalid {label} primary key: {key}")
             # Type-normalise every contract value before comparison/hash.  It both
             # validates numeric inputs and prevents Decimal formatting drift.
-            for column, data_type in columns.items():
+            for column, data_type in compare_columns.items():
                 _normalise(row[column], data_type)
             indexed[key] = row
         return indexed
@@ -63,14 +73,14 @@ def reconcile_rows(dataset_name, legacy_rows, iceberg_rows, contract, *, numeric
     missing, extra = sorted(set(legacy) - set(iceberg)), sorted(set(iceberg) - set(legacy))
     differences = []
     for key in sorted(set(legacy) & set(iceberg)):
-        for column, data_type in columns.items():
+        for column, data_type in compare_columns.items():
             left, right = _normalise(legacy[key][column], data_type), _normalise(iceberg[key][column], data_type)
             if data_type.startswith(("decimal", "long")) and left is not None and right is not None:
                 if abs(Decimal(left) - Decimal(right)) > numeric_tolerance:
                     differences.append({"key": key, "column": column, "legacy": str(left), "iceberg": str(right)})
             elif left != right:
                 differences.append({"key": key, "column": column, "legacy": left, "iceberg": right})
-    digest = lambda rows: hashlib.sha256("\n".join(sorted(_canonical(row, columns) for row in rows)).encode()).hexdigest()
+    digest = lambda rows: hashlib.sha256("\n".join(sorted(_canonical(row, compare_columns) for row in rows)).encode()).hexdigest()
     report = {"dataset_name": dataset_name, "contract_version": contract["semantic"]["version"], "legacy_row_count": len(legacy), "iceberg_row_count": len(iceberg), "missing_keys": missing, "extra_keys": extra, "differences": differences, "legacy_hash": digest(legacy.values()), "iceberg_hash": digest(iceberg.values())}
     report["status"] = "PASS" if not missing and not extra and not differences and report["legacy_hash"] == report["iceberg_hash"] else "FAIL"
     return report

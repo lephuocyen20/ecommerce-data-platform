@@ -14,7 +14,8 @@ from .manifest import (build_graph_manifest, build_graph_run_manifest, build_tab
                        read_table_manifests, table_manifest_key)
 from .quality import validate_table_frame
 from .reader import read_dimensional_sources
-from .transformations import build_dim_customer, build_dim_date, build_dim_product, build_fact_orders
+from .transformations import build_dim_customer, build_dim_date, build_dim_product, build_fact_orders, build_fact_order_items, build_fact_payments, build_fact_shipments
+from common.bounded_e2e_scope import TEST_BUCKET
 
 DRY_RUN = "DRY_RUN"
 WRITE = "WRITE"
@@ -24,10 +25,14 @@ class DimensionalWriteError(ValueError):
     pass
 
 
-def _identifier(table):
+def _namespace(scope=None):
+    return scope.gold_namespace if scope is not None else DIMENSIONAL_NAMESPACE
+
+
+def _identifier(table, scope=None):
     if table not in WRITE_ORDER:
         raise DimensionalWriteError(f"Target table is not allowlisted: {table}")
-    return f"{DIMENSIONAL_CATALOG}.{DIMENSIONAL_NAMESPACE}.{table}"
+    return f"{DIMENSIONAL_CATALOG}.{_namespace(scope)}.{table}"
 
 
 def assert_write_allowed(mode):
@@ -37,9 +42,9 @@ def assert_write_allowed(mode):
         raise DimensionalWriteError("WRITE requires GOLD_DIMENSIONAL_WRITE_ENABLED=true")
 
 
-def create_target_table(spark, table):
-    identifier = _identifier(table)
-    spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {DIMENSIONAL_CATALOG}.{DIMENSIONAL_NAMESPACE}")
+def create_target_table(spark, table, scope=None):
+    identifier = _identifier(table, scope)
+    spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {DIMENSIONAL_CATALOG}.{_namespace(scope)}")
     spark.sql(
         f"CREATE TABLE IF NOT EXISTS {identifier} ({TABLE_DDLS[table]}) USING iceberg "
         "TBLPROPERTIES ('format-version'='2')"
@@ -47,9 +52,9 @@ def create_target_table(spark, table):
     validate_target_table(spark, table)
 
 
-def validate_target_table(spark, table):
+def validate_target_table(spark, table, scope=None):
     """Reject pre-existing Gold tables that drift from the frozen v1 contract."""
-    identifier = _identifier(table)
+    identifier = _identifier(table, scope)
     schema = tuple((field.name, field.dataType.simpleString(), field.nullable) for field in spark.table(identifier).schema.fields)
     if schema != TABLE_SCHEMA[table]:
         raise DimensionalWriteError(f"Existing Iceberg target schema drift for {table}")
@@ -60,9 +65,9 @@ def validate_target_table(spark, table):
     return True
 
 
-def merge_table(spark, table, dataframe):
+def merge_table(spark, table, dataframe, scope=None):
     """Idempotently upsert one validated target using its declared grain."""
-    identifier = _identifier(table)
+    identifier = _identifier(table, scope)
     if tuple(dataframe.columns) != TABLE_COLUMNS[table]:
         raise DimensionalWriteError(f"Refusing schema drift for {table}")
     view = f"_gold_dimensional_{table}"
@@ -80,8 +85,8 @@ def merge_table(spark, table, dataframe):
     )
 
 
-def current_snapshot_id(spark, table):
-    identifier = _identifier(table)
+def current_snapshot_id(spark, table, scope=None):
+    identifier = _identifier(table, scope)
     rows = spark.sql(f"SELECT snapshot_id FROM {identifier}.snapshots ORDER BY committed_at DESC LIMIT 1").collect()
     if len(rows) != 1 or not isinstance(rows[0].snapshot_id, int) or rows[0].snapshot_id <= 0:
         raise DimensionalWriteError(f"No current Iceberg snapshot for {table}")
@@ -95,6 +100,9 @@ def build_graph_frames(spark, sources, *, dim_date_start, dim_date_end):
         "dim_product": build_dim_product(sources["products"]),
     }
     frames["fact_orders"] = build_fact_orders(sources["orders"], sources["order_items"], frames["dim_customer"])
+    frames["fact_order_items"] = build_fact_order_items(sources["order_items"], frames["dim_product"])
+    frames["fact_payments"] = build_fact_payments(sources["payments"])
+    frames["fact_shipments"] = build_fact_shipments(sources["shipments"])
     quality = {table: validate_table_frame(table, frames[table], frames) for table in WRITE_ORDER}
     return frames, quality
 
@@ -109,7 +117,7 @@ def recovery_state(graph_published, table_states):
     return "NEW"
 
 
-def run_dimensional_graph(spark, client, bucket, lineage, *, dim_date_start, dim_date_end, mode=DRY_RUN):
+def run_dimensional_graph(spark, client, bucket, lineage, *, dim_date_start, dim_date_end, mode=DRY_RUN, scope=None):
     """Validate and optionally publish the whole Gold graph in dependency order.
 
     A failed write intentionally leaves the graph manifest unpublished.  The
@@ -117,38 +125,48 @@ def run_dimensional_graph(spark, client, bucket, lineage, *, dim_date_start, dim
     before any retry; this avoids treating a partial run as a successful graph.
     """
     assert_write_allowed(mode)
-    graph = build_graph_manifest(lineage, dim_date_start=dim_date_start, dim_date_end=dim_date_end)
-    completed = read_completed_graph(client, bucket, graph)
+    if bucket == TEST_BUCKET and scope is None:
+        raise DimensionalWriteError("ecommerce-data-lake WRITE requires a validated bounded E2E scope")
+    graph = build_graph_manifest(lineage, dim_date_start=dim_date_start, dim_date_end=dim_date_end, scope=scope)
+    if scope is not None and bucket != scope.bucket:
+        raise DimensionalWriteError("E2E scope bucket does not match writer bucket")
+    completed = read_completed_graph(client, bucket, graph, scope)
     if completed is not None:
         return {"status": "ALREADY_PUBLISHED", "graph": graph, "graph_run": completed, "tables": []}
-    table_manifests = read_table_manifests(client, bucket, graph)
+    table_manifests = read_table_manifests(client, bucket, graph, scope)
     state = recovery_state(False, {table: "PUBLISHED" for table in table_manifests})
     if state == "PARTIAL_REQUIRES_RECONCILIATION":
         return {"status": state, "graph": graph, "tables": sorted(table_manifests)}
     # A persistent immutable fence serializes writers.  It is acquired before
     # source reads so no Spark MERGE can begin under an ambiguous ownership.
-    global_fence = acquire_global_fence(client, bucket, graph) if mode == WRITE else None
+    # Shared-bucket E2E runs are isolated by their immutable prefix and must
+    # never create or remove the legacy bucket-global coordination object.
+    global_fence = acquire_global_fence(client, bucket, graph, scope) if mode == WRITE and scope is None else None
     try:
-        fence = acquire_graph_fence(client, bucket, graph) if mode == WRITE else None
+        fence = acquire_graph_fence(client, bucket, graph, scope) if mode == WRITE else None
     except Exception:
         # No target write occurred when the per-graph fence cannot be obtained.
         # Releasing the just-created global coordination object is safe here.
-        release_global_fence(client, bucket, global_fence)
+        if global_fence is not None:
+            release_global_fence(client, bucket, global_fence)
         raise
     if mode == WRITE:
         # Another writer can complete after the first preflight; recheck under
         # the fence before any read or write.
-        completed = read_completed_graph(client, bucket, graph)
-        table_manifests = read_table_manifests(client, bucket, graph)
+        completed = read_completed_graph(client, bucket, graph, scope)
+        table_manifests = read_table_manifests(client, bucket, graph, scope)
         if completed is not None:
-            release_global_fence(client, bucket, global_fence)
+            if global_fence is not None:
+                release_global_fence(client, bucket, global_fence)
             return {"status": "ALREADY_PUBLISHED", "graph": graph, "graph_run": completed, "tables": []}
         if table_manifests:
-            release_global_fence(client, bucket, global_fence)
+            if global_fence is not None:
+                release_global_fence(client, bucket, global_fence)
             return {"status": "PARTIAL_REQUIRES_RECONCILIATION", "graph": graph, "tables": sorted(table_manifests)}
-        assert_global_fence(client, bucket, global_fence)
-        assert_graph_fence(client, bucket, graph, fence)
-    sources = read_dimensional_sources(spark, client, bucket, lineage)
+        if global_fence is not None:
+            assert_global_fence(client, bucket, global_fence, scope)
+        assert_graph_fence(client, bucket, graph, fence, scope)
+    sources = read_dimensional_sources(spark, client, bucket, lineage, scope)
     frames, quality = build_graph_frames(spark, sources, dim_date_start=dim_date_start, dim_date_end=dim_date_end)
     if mode == DRY_RUN:
         return {"status": DRY_RUN, "graph": graph, "quality": quality, "tables": list(WRITE_ORDER)}
@@ -156,18 +174,21 @@ def run_dimensional_graph(spark, client, bucket, lineage, *, dim_date_start, dim
     published = []
     try:
         for table in WRITE_ORDER:
-            assert_global_fence(client, bucket, global_fence)
-            assert_graph_fence(client, bucket, graph, fence)
-            create_target_table(spark, table)
-            merge_table(spark, table, frames[table])
-            manifest = build_table_manifest(graph, table=table, snapshot_id=current_snapshot_id(spark, table), quality=quality[table])
-            state = publish_manifest(client, bucket, manifest, table_manifest_key(graph["identity"], table))
+            if global_fence is not None:
+                assert_global_fence(client, bucket, global_fence, scope)
+            assert_graph_fence(client, bucket, graph, fence, scope)
+            create_target_table(spark, table, scope)
+            merge_table(spark, table, frames[table], scope)
+            manifest = build_table_manifest(graph, table=table, snapshot_id=current_snapshot_id(spark, table, scope), quality=quality[table])
+            state = publish_manifest(client, bucket, manifest, table_manifest_key(graph["identity"], table, scope))
             published.append({"table": table, "state": state, "manifest": manifest})
     except Exception as exc:
         raise DimensionalWriteError(f"Gold dimensional graph partially published: {[item['table'] for item in published]}") from exc
     graph_run = build_graph_run_manifest(graph, [item["manifest"] for item in published])
-    assert_global_fence(client, bucket, global_fence)
-    assert_graph_fence(client, bucket, graph, fence)
-    graph_state = publish_manifest(client, bucket, graph_run, graph_manifest_key(graph["identity"]))
-    release_global_fence(client, bucket, global_fence)
+    if global_fence is not None:
+        assert_global_fence(client, bucket, global_fence, scope)
+    assert_graph_fence(client, bucket, graph, fence, scope)
+    graph_state = publish_manifest(client, bucket, graph_run, graph_manifest_key(graph["identity"], scope))
+    if global_fence is not None:
+        release_global_fence(client, bucket, global_fence, scope)
     return {"status": graph_state, "graph": graph, "graph_run": graph_run, "quality": quality, "tables": published}

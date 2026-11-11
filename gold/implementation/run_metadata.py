@@ -1,8 +1,9 @@
 """Validated run-level lineage record shared by Gold certification tooling."""
 
 import json
+import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 REQUIRED_FIELDS = {"run_id", "bronze_batch_ids", "silver_snapshots", "iceberg_snapshots", "attestations", "evidence", "gold_snapshot_id", "status", "code_sha", "started_at", "completed_at", "duration_seconds", "rows_read", "rows_written", "rows_rejected"}
@@ -41,3 +42,35 @@ def build_gold_run_metadata(**values):
 def canonical_run_metadata(metadata):
     build_gold_run_metadata(**metadata)
     return json.dumps(metadata, sort_keys=True, separators=(",", ":"))
+
+
+def build_runtime_dimensional_metadata(*, lineage, result, mode, environment=None, started_at=None):
+    """Build one run-scoped document after the dimensional writer completes."""
+    values = os.environ if environment is None else environment
+    started = started_at or datetime.now(timezone.utc)
+    completed = datetime.now(timezone.utc)
+    sources = lineage["sources"]
+    run_id = values.get("GOLD_RUN_ID") or values.get("AIRFLOW_CTX_DAG_RUN_ID") or values.get("LAKEHOUSE_E2E_RUN_ID")
+    if not run_id:
+        raise ValueError("GOLD_RUN_ID or Airflow run context is required for metadata persistence")
+    code_sha = values.get("GOLD_CODE_SHA", "local000")
+    status = "PASS" if mode == "WRITE" and result.get("status") in {"PUBLISHED", "ALREADY_PUBLISHED"} else "DRY_RUN"
+    graph_identity = result.get("graph", {}).get("identity")
+    gold_snapshot_id = f"gold_snap_{graph_identity}" if status == "PASS" and graph_identity else None
+    return build_gold_run_metadata(
+        run_id=run_id,
+        bronze_batch_ids={table: source.get("bronze_batch_id") for table, source in sources.items()},
+        silver_snapshots={table: str(source["snapshot_id"]) for table, source in sources.items()},
+        iceberg_snapshots={table: source["snapshot_id"] for table, source in sources.items()},
+        attestations={table: source["snapshot_attestation_identity"] for table, source in sources.items()},
+        evidence={table: source["quality_evidence"]["identity"] for table, source in sources.items()},
+        gold_snapshot_id=gold_snapshot_id,
+        status=status,
+        code_sha=code_sha,
+        started_at=started.isoformat().replace("+00:00", "Z"),
+        completed_at=completed.isoformat().replace("+00:00", "Z"),
+        duration_seconds=max(0, (completed - started).total_seconds()),
+        rows_read=sum(source.get("row_count", 0) for source in sources.values()),
+        rows_written=sum(item.get("row_count", 0) for item in result.get("quality", {}).values()),
+        rows_rejected=0,
+    )

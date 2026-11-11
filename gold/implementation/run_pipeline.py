@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import sys
+from datetime import datetime, timezone
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
@@ -59,6 +60,7 @@ from gold.implementation.storage.objects import discover_gold_parquet_objects
 from gold.implementation.storage.publisher import publish_gold_snapshot
 from gold.implementation.storage.recovery import execute_gold_recovery
 from gold.implementation.storage.writer import write_gold_snapshot_parquet
+from gold.implementation.run_metadata_repository import persist_if_enabled
 
 
 DATASET_HANDLERS = {
@@ -83,6 +85,26 @@ DATASET_HANDLERS = {
         validate_payment_summary_output,
     ),
 }
+
+
+def _persist_run_metadata_if_enabled(dataset_name, result, source_lineage, source_dfs):
+    """Keep Gold run metadata opt-in and outside the normal read-only path."""
+    if os.environ.get("GOLD_RUN_METADATA_PERSIST_ENABLED", "false").lower() != "true":
+        return {"persisted": False, "reason": "GOLD_RUN_METADATA_PERSIST_ENABLED=false"}
+    raw_metadata = os.environ.get("GOLD_RUN_METADATA_JSON")
+    if not raw_metadata:
+        raise RuntimeError("Gold metadata persistence requires attested GOLD_RUN_METADATA_JSON")
+    try:
+        metadata = json.loads(raw_metadata)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("GOLD_RUN_METADATA_JSON must be valid JSON") from exc
+    if not isinstance(metadata, dict):
+        raise RuntimeError("GOLD_RUN_METADATA_JSON must be an object")
+    if metadata.get("status") == "PASS" and not result.get("snapshot_id"):
+        raise RuntimeError("Gold metadata PASS requires a published Gold snapshot")
+    # Do not manufacture batch IDs, attestations, or snapshot identities from
+    # incomplete lineage. The repository performs the final strict validation.
+    return persist_if_enabled(dataset_name, metadata, connection_factory=lambda: __import__("ingestion.incremental.database", fromlist=["get_db_connection"]).get_db_connection())
 
 
 def parse_args():
@@ -399,6 +421,10 @@ def run_dataset(
                     source_lineage=(source_lineage if source_lineage["source_type"] == ICEBERG_SNAPSHOT else None),
                 )
             )
+
+        result["run_metadata"] = _persist_run_metadata_if_enabled(
+            dataset_name, result, source_lineage, source_dfs
+        )
 
         return result
 

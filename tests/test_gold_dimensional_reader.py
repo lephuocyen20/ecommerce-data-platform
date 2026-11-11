@@ -2,12 +2,13 @@ import pytest
 
 from lakehouse.models.spec import SPECS
 from gold.implementation.dimensional import reader
+from gold.implementation.dimensional.contracts import DIMENSIONAL_SOURCE_TABLES
 from gold.implementation.dimensional.lineage import DimensionalLineageError
 
 
 def dimensional_lineage():
     sources = {}
-    for offset, table in enumerate(("customers", "order_items", "orders", "products"), start=1):
+    for offset, table in enumerate(DIMENSIONAL_SOURCE_TABLES, start=1):
         sources[table] = {
             "source_type": "iceberg_snapshot", "table": table, "catalog": "lakehouse", "namespace": "silver", "ref": "main", "snapshot_id": offset,
             "snapshot_attestation_identity": f"{offset:064x}",
@@ -49,7 +50,8 @@ def test_reader_verifies_evidence_and_reads_pinned_snapshot(monkeypatch):
     sources = reader.read_dimensional_sources(spark, object(), "bucket", lineage)
     assert set(sources) == set(lineage["sources"])
     assert all("VERSION AS OF" in statement for statement in spark.statements)
-    assert len(calls) == 12
+    assert all("SELECT *" not in statement for statement in spark.statements)
+    assert len(calls) == 18
 
 
 def test_reader_fails_closed_on_silver_schema_drift(monkeypatch):

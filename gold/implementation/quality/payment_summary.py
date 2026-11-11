@@ -166,12 +166,18 @@ def validate_payment_summary_output(gold_df):
         )
         | F.col("total_payment_amount").isNull()
         | (F.col("total_payment_amount") < 0)
+        | F.col("signed_revenue").isNull()
     )
 
     require(
         not has_rows(invalid_metrics),
         "payment_summary: invalid metrics",
     )
+    invalid_signed = gold_df.filter(
+        ((F.col("payment_status") == "REFUNDED") & (F.col("signed_revenue") > 0))
+        | ((F.col("payment_status") != "REFUNDED") & (F.col("signed_revenue") < 0))
+    )
+    require(not has_rows(invalid_signed), "payment_summary: invalid signed_revenue sign")
 
     return {
         "status": "PASS",

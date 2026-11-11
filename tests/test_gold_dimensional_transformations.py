@@ -102,6 +102,20 @@ def test_fact_orders_aggregates_items_without_fanout_and_maps_unknown_customer(s
     assert rows[11].line_count == 0
 
 
+def test_fact_orders_rejects_conflicting_duplicate_orders(spark):
+    orders = spark.createDataFrame(
+        [(10, 1, "2026-02-01", "paid"), (10, 2, "2026-02-01", "paid")],
+        "order_id long, customer_id long, order_date string, status string",
+    )
+    items = spark.createDataFrame([], "order_item_id long, order_id long, quantity long, unit_price decimal(10,2), discount_amount decimal(10,2)")
+    dimensions = build_dim_customer(spark.createDataFrame(
+        [(1, "Customer", "customer@example.com", "2026-01-01", "2026-01-01")],
+        "customer_id long, full_name string, email string, created_at string, updated_at string",
+    ))
+    with pytest.raises(ValueError, match="Conflicting duplicate orders"):
+        build_fact_orders(orders, items, dimensions)
+
+
 def test_fact_orders_parity_maps_customer_natural_key():
     legacy = [{
         "order_id": 10, "customer_id": 1, "order_date_key": 20260201,

@@ -1,4 +1,4 @@
-﻿from unittest.mock import patch
+from unittest.mock import patch
 
 import pytest
 
@@ -51,7 +51,7 @@ def test_enabled_write_validates_database_before_executing():
     conn.autocommit = False
 
     cursor = conn.cursor.return_value.__enter__.return_value
-    cursor.fetchone.return_value = ("ecommerce_test",)
+    cursor.fetchone.return_value = (m.EXPECTED_DB_NAME,)
 
     with patch.dict(
         func.__globals__,

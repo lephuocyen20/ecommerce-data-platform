@@ -167,6 +167,7 @@ def validate_daily_sales_sources(orders_df, items_df):
                     "SHIPPED",
                     "DELIVERED",
                     "CANCELLED",
+                    "DELETED",
                 )
             )
         ),
@@ -229,6 +230,7 @@ def validate_daily_sales_output(gold_df):
         "discount_amount",
         "net_order_value",
         "delivered_order_value",
+        "signed_revenue",
     ]
 
     invalid_metrics = None
