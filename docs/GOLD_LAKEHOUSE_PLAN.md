@@ -548,3 +548,17 @@ not perform external table/object writes.
   **PASS**, stale-pattern scan **PASS**, and `git diff --check` **PASS**.
 - Independent QA: **PASS**. No remaining finding in this batch; no production
   certification, cutover, or shared-service mutation was performed.
+
+#### Cleanup batch 3 — obsolete snapshot scripts and duplicate test
+
+- Deleted eight unreferenced manual snapshot/runtime scripts under `tests/`:
+  the old snapshot audit/readiness/state checks, Spark/PostgreSQL probes, and
+  the old all/orders snapshot runners.
+- Deleted duplicate `silver/snapshots/test_snapshot_object_discovery.py`;
+  canonical coverage remains in `tests/test_snapshot_object_discovery.py`.
+- Verification: pytest collection **PASS** (`733 tests collected`), targeted
+  snapshot/orchestration/config regression **46 passed**, canonical snapshot
+  object test **7 passed**, no-reference scan **PASS**, and `git diff --check`
+  **PASS**.
+- Independent QA: **PASS**. Current Bronze → Silver → Gold entrypoints and
+  compatibility/backfill modules were not affected.
