@@ -532,3 +532,19 @@ not perform external table/object writes.
   CI YAML, pytest collection, smoke-test compilation, E2E path collection and
   `git diff --check` all passed. This cleanup does not advance a roadmap phase
   or authorize production/cutover operations.
+
+#### Cleanup batch 2 — stale local configuration and generated artifacts
+
+- Removed obsolete dbt-specific ignore rules and corrected stale Warehouse
+  wording in `.env.example`; retained all active source, MinIO, Airflow, Spark,
+  and lakehouse flags.
+- Removed untracked generated `warehouse/` dbt `target`/log artifacts after
+  confirming `git ls-files warehouse` was empty. No tracked code or data was
+  removed.
+- Canonicalized the Spark Compose Nessie default to
+  `http://nessie:19120/api/v2`, matching the root Compose and local quality-it
+  configuration.
+- Verification: 25 targeted tests **PASS**, combined Compose config
+  **PASS**, stale-pattern scan **PASS**, and `git diff --check` **PASS**.
+- Independent QA: **PASS**. No remaining finding in this batch; no production
+  certification, cutover, or shared-service mutation was performed.

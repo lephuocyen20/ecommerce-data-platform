@@ -21,12 +21,6 @@ airflow/logs/
 # Ignore test environment variables
 source/.env.test
 
-# dbt generated files
-**/dbt_packages/
-**/target/
-**/logs/
-**/dbt.log
-
 # Runtime staging data
 /staging/
 
