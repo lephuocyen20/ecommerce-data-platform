@@ -72,7 +72,7 @@ def make_parent_resolver(spark):
     return resolve
 
 
-def run_quality(spark, *, specs=SPECS, table_name=None, sample_limit: int = 10):
+def run_quality(spark, *, specs=SPECS, table_name=None, sample_limit: int = 10, batch_id: str | None = None):
     """Execute every configured quality rule without mutating Spark or Iceberg."""
     selected = _validate_selection(specs, table_name, sample_limit)
     reports = []
@@ -81,6 +81,12 @@ def run_quality(spark, *, specs=SPECS, table_name=None, sample_limit: int = 10):
         table = table_identifier(name)
         try:
             dataframe, snapshot_id = read_table_snapshot(spark, table)
+            if batch_id is not None:
+                if not isinstance(batch_id, str) or not batch_id:
+                    raise ValueError("batch_id must be a non-empty string")
+                if "_batch_id" not in dataframe.columns:
+                    raise RuntimeError(f"Iceberg table is missing _batch_id for incremental quality scope: {table}")
+                dataframe = dataframe.where(dataframe["_batch_id"] == batch_id)
             rows = int(dataframe.count())
             plan = build_quality_plan(specs[name], specs)
             checks = tuple(

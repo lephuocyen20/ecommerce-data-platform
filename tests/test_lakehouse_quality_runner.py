@@ -25,9 +25,26 @@ class _Catalog:
 class _Frame:
     def __init__(self, rows=0):
         self.rows = rows
+        self.columns = ["_batch_id"]
+        self.filtered = None
 
     def count(self):
         return self.rows
+
+    def __getitem__(self, key):
+        return _Column(key)
+
+    def where(self, condition):
+        self.filtered = condition
+        return self
+
+
+class _Column:
+    def __init__(self, name):
+        self.name = name
+
+    def __eq__(self, value):
+        return (self.name, value)
 
 
 class _Spark:
@@ -95,6 +112,14 @@ def test_fk_resolver_uses_explicit_configured_parent_table():
     assert parent is spark.frame
     assert spark.catalog.calls == ["lakehouse.silver.customers"]
     assert spark.tables == ["lakehouse.silver.customers"]
+
+
+def test_incremental_quality_scopes_to_manifest_batch(monkeypatch):
+    spark = _Spark()
+    monkeypatch.setattr(runner, "evaluate_check", lambda *_args, **_kwargs:
+                        QualityResult("check", "SCHEMA", PASS, "lakehouse.silver.customers"))
+    runner.run_quality(spark, specs={"customers": SPECS["customers"]}, batch_id="a" * 32)
+    assert spark.frame.filtered == ("_batch_id", "a" * 32)
 
 
 @pytest.mark.parametrize("kwargs", [{"specs": {}}, {"table_name": "missing"}, {"sample_limit": -1}])

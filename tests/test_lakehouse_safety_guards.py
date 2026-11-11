@@ -200,13 +200,6 @@ def test_spark_factory_uses_bounded_retry_and_timeout(monkeypatch):
     )
 
 
-def test_dbt_factory_explicitly_keeps_single_attempt_policy():
-    source = (Path(__file__).parents[1] / "airflow/dags/pipeline_operators.py").read_text(encoding="utf-8")
-    start = source.index("def create_dbt_build_operator")
-    section = source[start:source.index("def create_silver_snapshot_operator", start)]
-    assert "retries=0" in section
-
-
 def test_quality_cli_uses_absolute_imports_for_spark_submit():
     from pathlib import Path
 

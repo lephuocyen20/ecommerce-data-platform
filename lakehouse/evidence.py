@@ -48,10 +48,12 @@ def verify_evidence(document, *, kind, table, snapshot_id, catalog="lakehouse", 
     return True
 
 
-def publish_evidence(client, bucket, evidence):
+def publish_evidence(client, bucket, evidence, *, scope=None):
     """Create an immutable evidence object; never overwrite a different proof."""
     verify_evidence(evidence, kind=evidence["kind"], table=evidence["table"], snapshot_id=evidence["snapshot_id"], catalog=evidence["catalog"], namespace=evidence["namespace"], ref=evidence["ref"], snapshot_attestation_identity=evidence["snapshot_attestation_identity"])
     key = evidence_key(evidence["identity"])
+    if scope is not None:
+        key = scope.key(key)
     try:
         actual = read_json_object(client, bucket, key)
         if actual != evidence:
@@ -77,16 +79,17 @@ def publish_evidence(client, bucket, evidence):
 
 def publish_pass_evidence_for_attestation(client, bucket, *, kind, table, snapshot_id,
                                           details, attestation_identity,
-                                          catalog="lakehouse", namespace="silver", ref="main"):
+                                          catalog="lakehouse", namespace="silver", ref="main", scope=None):
     """Publish authorization evidence only after its attestation is read-back verified."""
     from lakehouse.attestation import read_snapshot_attestation
     read_snapshot_attestation(
         client, bucket, attestation_identity, table=table, snapshot_id=snapshot_id,
         catalog=catalog, namespace=namespace, ref=ref,
+        scope=scope,
     )
     evidence = build_evidence(
         kind=kind, table=table, snapshot_id=snapshot_id, status="PASS", details=details,
         catalog=catalog, namespace=namespace, ref=ref,
         snapshot_attestation_identity=attestation_identity,
     )
-    return {"evidence": evidence, **publish_evidence(client, bucket, evidence)}
+    return {"evidence": evidence, **publish_evidence(client, bucket, evidence, scope=scope)}

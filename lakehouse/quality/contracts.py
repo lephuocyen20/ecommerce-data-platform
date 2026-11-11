@@ -81,11 +81,12 @@ class TableQualityReport:
     rows: Optional[int]
     checks: tuple
     error: Optional[QualityError] = None
+    quality_evidence_identity: Optional[str] = None
 
     def as_dict(self):
         return _json_safe({"table": self.table, "status": self.status, "snapshot_id": self.snapshot_id,
                            "rows": self.rows, "checks": [check.as_dict() for check in self.checks],
-                           "error": self.error})
+                           "error": self.error, "quality_evidence_identity": self.quality_evidence_identity})
 
 
 def _managed_columns(spec):

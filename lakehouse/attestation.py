@@ -70,9 +70,10 @@ def verify_snapshot_attestation(document, **expected):
     return True
 
 
-def attestation_key(identity):
+def attestation_key(identity, scope=None):
     _sha256(identity, "attestation identity")
-    return f"lakehouse/attestations/v1/{identity}.json"
+    key = f"lakehouse/attestations/v1/{identity}.json"
+    return scope.key(key) if scope is not None else key
 
 
 def _read_json(client, bucket, key):
@@ -87,10 +88,10 @@ def _is_precondition_conflict(exc):
     return getattr(exc, "code", None) in {"PreconditionFailed", "ConditionalRequestConflict"}
 
 
-def publish_snapshot_attestation(client, bucket, attestation):
+def publish_snapshot_attestation(client, bucket, attestation, *, scope=None):
     """Idempotently create and read-back verify a content-addressed object."""
     verify_snapshot_attestation(attestation)
-    key = attestation_key(attestation["identity"])
+    key = attestation_key(attestation["identity"], scope)
     try:
         current = _read_json(client, bucket, key)
     except Exception as exc:
@@ -115,7 +116,7 @@ def publish_snapshot_attestation(client, bucket, attestation):
     return {"status": "PUBLISHED", "key": key, "identity": attestation["identity"]}
 
 
-def read_snapshot_attestation(client, bucket, identity, **expected):
-    document = _read_json(client, bucket, attestation_key(identity))
+def read_snapshot_attestation(client, bucket, identity, *, scope=None, **expected):
+    document = _read_json(client, bucket, attestation_key(identity, scope))
     verify_snapshot_attestation(document, identity=identity, **expected)
     return document
