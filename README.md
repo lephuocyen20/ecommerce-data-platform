@@ -1,6 +1,6 @@
 # Ecommerce Data Platform
 
-Production-oriented local data platform for a dimensional Iceberg lakehouse.
+A portfolio-grade local data platform demonstrating a dimensional Iceberg lakehouse.
 The supported path is:
 
 `PostgreSQL source → Bronze (MinIO) → verified Silver Parquet → Gold Iceberg dimensions/facts`
@@ -12,8 +12,11 @@ writes.
 
 ## Current roadmap
 
+This is a reproducible local portfolio demonstration. Enterprise production
+deployment and consumer cutover are optional future work.
+
 The version-controlled roadmap is [`docs/GOLD_LAKEHOUSE_PLAN.md`](docs/GOLD_LAKEHOUSE_PLAN.md).
-The current scope is local validation and runtime certification of the
+The current scope is local validation and bounded runtime evidence for the
 Bronze → Silver → Gold lakehouse. Production routing, consumer cutover, and
 unbounded writes remain explicitly out of scope.
 
@@ -56,11 +59,11 @@ python -m pytest -q -m "unit or integration" -p no:cacheprovider
 ```
 
 Bounded Iceberg E2E writes require the explicit `LAKEHOUSE_E2E_*` approval and
-scope described in [`AGENTS.md`](AGENTS.md). No production or shared-service
-cutover is implied by a local PASS.
+scope described in [`AGENTS.md`](AGENTS.md). The certified run-04 is a local
+portfolio demonstration, not a production deployment claim.
 
 ## Development status
 
 The implementation is organized into independently reviewable local commits.
-Check the roadmap for the latest phase verdict, evidence, warnings, and the
-next required approval gate.
+Check the roadmap and runbook for demo evidence and verification commands.
+Production hardening notes are optional future work.

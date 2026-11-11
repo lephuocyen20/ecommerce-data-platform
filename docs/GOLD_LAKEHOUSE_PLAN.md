@@ -664,3 +664,31 @@ not perform external table/object writes.
   fresh runtime evidence is required.
 - No external write, cutover, checkpoint reset, object deletion, or commit was
   performed.
+
+## Portfolio scope clarification (2026-11-11)
+
+- The primary goal is a portfolio-grade local lakehouse demonstration:
+  `PostgreSQL -> Bronze -> Silver Parquet -> Gold Iceberg` with Airflow,
+  quality checks, idempotency and bounded E2E evidence.
+- Bounded run-04 is the representative runtime proof; it is not a production
+  deployment claim.
+- Enterprise production authentication, HA, consumer cutover and unbounded
+  writes are optional future hardening, not current acceptance gates.
+- Gold runtime architecture is intentionally one atomic writer task that
+  materializes seven Iceberg tables; the seven Airflow Gold nodes are
+  confirmation markers, not independent writers.
+
+#### Session I — portfolio scope cleanup (2026-11-11)
+
+- Removed stale production-only planning documents after removing the unused
+  production runtime guard code.
+- Updated the local Compose regression assertion to match the current DAG
+  construction while preserving the one-writer/seven-marker topology.
+- Corrected the Airflow test harness to provide the mocked
+  `AirflowSkipException` dependency used by the operator module.
+- Focused verification: **76 passed**; `compileall` **PASS**;
+  `git diff --check` **PASS**.
+- No external write, catalog mutation, cutover, cleanup, or commit was
+  performed.
+- QA verdict: **PASS WITH WARNINGS**. The full suite still includes separate
+  Windows/Spark environment failures; those are not caused by this cleanup.

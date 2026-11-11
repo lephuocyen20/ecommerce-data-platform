@@ -90,9 +90,11 @@ def test_local_e2e_env_selects_write_mode_for_all_tables(monkeypatch):
 def test_local_e2e_write_selection_drives_all_silver_branches():
     dag_source = (ROOT / "airflow" / "dags" / "ecommerce_incremental_ingestion.py").read_text(encoding="utf-8")
     assert "config = validate_config()" in dag_source
-    assert "eligibility = {table:" in dag_source
-    assert "transforms = {table: create_incremental_silver_operator" in dag_source
+    assert "eligibility = {}" in dag_source
+    assert "transforms = {}" in dag_source
+    assert "create_incremental_silver_operator(table_name=table, project_path=PROJECT_PATH)" in dag_source
     assert "eligibility[table] >> [skip, transforms[table]]" in dag_source
+    assert "list(dimensional_artifacts.values()) >> dimensional_writer" in dag_source
     assert "for table in TABLES" in dag_source
 
 
