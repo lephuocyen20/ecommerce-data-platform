@@ -50,11 +50,20 @@ def source_contract_metadata(lineage):
         raise DimensionalLineageError("Physical deletes are not permitted; use tombstones")
     if schema != DEFAULT_SCHEMA_POLICY:
         raise DimensionalLineageError("Unsupported schema evolution policy")
+    sources = {}
+    for table in DIMENSIONAL_SOURCE_TABLES:
+        source = lineage["sources"][table]
+        metadata = {
+            "delete_count": source.get("delete_count", 0),
+            "reprocess_required": source.get("reprocess_required", False),
+        }
+        # Iceberg lineage is pinned by snapshot_id. Parquet lineage is pinned
+        # by manifest identities and has no snapshot_id to carry forward.
+        if "snapshot_id" in source:
+            metadata["snapshot_id"] = source["snapshot_id"]
+        sources[table] = metadata
     return {"version": SOURCE_CONTRACT_VERSION, "late_data": late, "delete": delete, "schema_evolution": schema,
-            "sources": {table: {"snapshot_id": lineage["sources"][table]["snapshot_id"],
-                                 "delete_count": lineage["sources"][table].get("delete_count", 0),
-                                 "reprocess_required": lineage["sources"][table].get("reprocess_required", False)}
-                        for table in DIMENSIONAL_SOURCE_TABLES}}
+            "sources": sources}
 
 
 def _identifier(value, field):

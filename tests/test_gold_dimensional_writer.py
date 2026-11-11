@@ -101,6 +101,54 @@ def test_write_requires_exclusive_fence_before_any_source_read(monkeypatch):
                               dim_date_start="2026-01-01", dim_date_end="2026-01-02", mode=WRITE)
 
 
+def test_table_write_failure_includes_table_exception_and_published_tables(monkeypatch):
+    import gold.implementation.dimensional.writer as writer
+
+    monkeypatch.setenv("GOLD_DIMENSIONAL_WRITE_ENABLED", "true")
+    monkeypatch.setattr(writer, "read_completed_graph", lambda *args: None)
+    monkeypatch.setattr(writer, "read_table_manifests", lambda *args: {})
+    monkeypatch.setattr(writer, "acquire_global_fence", lambda *args: {"kind": "global"})
+    monkeypatch.setattr(writer, "assert_global_fence", lambda *args: None)
+    monkeypatch.setattr(writer, "release_global_fence", lambda *args: None)
+    monkeypatch.setattr(writer, "acquire_graph_fence", lambda *args: {"kind": "graph"})
+    monkeypatch.setattr(writer, "assert_graph_fence", lambda *args: None)
+    monkeypatch.setattr(writer, "read_dimensional_sources", lambda *args: {})
+    monkeypatch.setattr(
+        writer,
+        "build_graph_frames",
+        lambda *args, **kwargs: (
+            {table: object() for table in WRITE_ORDER},
+            {table: {"status": "PASS"} for table in WRITE_ORDER},
+        ),
+    )
+    monkeypatch.setattr(writer, "create_target_table", lambda _spark, table, _scope=None: (
+        (_ for _ in ()).throw(RuntimeError("simulated target failure"))
+        if table == "dim_customer"
+        else None
+    ))
+    monkeypatch.setattr(writer, "merge_table", lambda *args: None)
+    monkeypatch.setattr(writer, "current_snapshot_id", lambda *args: 1)
+    monkeypatch.setattr(writer, "publish_manifest", lambda *args: "PUBLISHED")
+
+    with pytest.raises(DimensionalWriteError) as caught:
+        run_dimensional_graph(
+            None,
+            object(),
+            "bucket",
+            dimensional_lineage(),
+            dim_date_start="2026-01-01",
+            dim_date_end="2026-01-02",
+            mode=WRITE,
+        )
+
+    error = caught.value
+    assert "'dim_customer'" in str(error)
+    assert "RuntimeError: simulated target failure" in str(error)
+    assert "published tables: ['dim_date']" in str(error)
+    assert isinstance(error.__cause__, RuntimeError)
+    assert str(error.__cause__) == "simulated target failure"
+
+
 def test_distinct_graph_identity_is_blocked_by_global_fence_before_merge(monkeypatch):
     import gold.implementation.dimensional.writer as writer
     monkeypatch.setenv("GOLD_DIMENSIONAL_WRITE_ENABLED", "true")
@@ -135,6 +183,35 @@ def test_create_and_merge_emit_only_allowlisted_ordered_sql():
     assert "format-version'='2" in spark.sqls[1]
     assert "write.format.default'='parquet" in spark.sqls[1]
     assert "MERGE INTO lakehouse.gold.dim_date" in spark.sqls[-1]
+
+
+def test_create_target_table_refreshes_catalog_before_validation(monkeypatch):
+    import gold.implementation.dimensional.writer as writer
+
+    events = []
+    scope = type("Scope", (), {"gold_namespace": "gold_run_20261111_gold_03"})()
+
+    class Catalog:
+        def refreshTable(self, identifier):
+            events.append(("refresh", identifier))
+
+    class Spark:
+        catalog = Catalog()
+
+        def sql(self, _statement):
+            events.append(("sql",))
+
+    monkeypatch.setattr(
+        writer,
+        "validate_target_table",
+        lambda _spark, _table, _scope=None: events.append(("validate", _scope)),
+    )
+
+    writer.create_target_table(Spark(), "dim_date", scope)
+
+    assert [event[0] for event in events] == ["sql", "sql", "refresh", "validate"]
+    assert events[2] == ("refresh", "lakehouse.gold_run_20261111_gold_03.dim_date")
+    assert events[3] == ("validate", scope)
 
 
 def test_existing_target_schema_or_format_drift_blocks_merge():

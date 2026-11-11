@@ -11,6 +11,18 @@
   bounded approval; this session did not perform external writes or destructive
   Iceberg/object-store operations.
 
+## Session 2026-11-11: read-only Gold quality-it metadata
+
+- Dedicated `ecommerce-quality-it` Nessie catalog contains all seven Gold
+  tables.
+- Read-only `$files` inspection reported `PARQUET` for every table; each table
+  had one file in the inspected snapshot, with records/bytes read back.
+- Read-only table properties reported `format=iceberg/parquet` and
+  `format-version=2` for the Gold tables; current snapshot IDs and Nessie
+  commit metadata were present.
+- No Gold `WRITE`, object mutation, cleanup, compaction, rollback or cutover
+  was executed. Production/disposable certification remains pending.
+
 ## Session 2026-11-11: Airflow Gold UI layout
 
 - Removed the `gold_iceberg` TaskGroup wrapper so `gold_dimensional_write` is

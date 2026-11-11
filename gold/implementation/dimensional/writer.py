@@ -55,7 +55,11 @@ def create_target_table(spark, table, scope=None):
         f"CREATE TABLE IF NOT EXISTS {identifier} ({TABLE_DDLS[table]}) USING iceberg "
         f"TBLPROPERTIES ({properties})"
     )
-    validate_target_table(spark, table)
+    catalog = getattr(spark, "catalog", None)
+    refresh_table = getattr(catalog, "refreshTable", None)
+    if callable(refresh_table):
+        refresh_table(identifier)
+    validate_target_table(spark, table, scope)
 
 
 def validate_target_table(spark, table, scope=None):
@@ -179,8 +183,10 @@ def run_dimensional_graph(spark, client, bucket, lineage, *, dim_date_start, dim
         return {"status": DRY_RUN, "graph": graph, "quality": quality, "tables": list(WRITE_ORDER)}
 
     published = []
+    current_table = None
     try:
         for table in WRITE_ORDER:
+            current_table = table
             if global_fence is not None:
                 assert_global_fence(client, bucket, global_fence, scope)
             assert_graph_fence(client, bucket, graph, fence, scope)
@@ -190,7 +196,11 @@ def run_dimensional_graph(spark, client, bucket, lineage, *, dim_date_start, dim
             state = publish_manifest(client, bucket, manifest, table_manifest_key(graph["identity"], table, scope))
             published.append({"table": table, "state": state, "manifest": manifest})
     except Exception as exc:
-        raise DimensionalWriteError(f"Gold dimensional graph partially published: {[item['table'] for item in published]}") from exc
+        raise DimensionalWriteError(
+            "Gold dimensional graph failed at table "
+            f"{current_table!r} ({type(exc).__name__}: {exc}); "
+            f"published tables: {[item['table'] for item in published]}"
+        ) from exc
     graph_run = build_graph_run_manifest(graph, [item["manifest"] for item in published])
     if global_fence is not None:
         assert_global_fence(client, bucket, global_fence, scope)

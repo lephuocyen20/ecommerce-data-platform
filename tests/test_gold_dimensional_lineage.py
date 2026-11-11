@@ -6,6 +6,8 @@ import pytest
 from gold.implementation.dimensional.contracts import DIMENSIONAL_SOURCE_TABLES
 from gold.implementation.dimensional.lineage import (
     DimensionalLineageError,
+    build_dimensional_lineage_from_artifacts,
+    build_parquet_lineage_artifact,
     dimensional_lineage_identity,
     validate_dimensional_lineage,
 )
@@ -339,6 +341,30 @@ def test_dimensional_lineage_source_contract_defaults_to_tombstones_and_overlap(
     metadata = source_contract_metadata(dimensional_lineage())
     assert metadata["delete"] == {"mode": "tombstone_only", "tombstone_column": "_is_deleted", "physical_delete": False}
     assert metadata["late_data"]["overlap_days"] == 2
+    assert metadata["sources"]["orders"]["delete_count"] == 0
+
+
+def test_parquet_lineage_source_contract_does_not_require_snapshot_id():
+    artifacts = {
+        table: build_parquet_lineage_artifact(
+            table=table,
+            bucket="ecommerce-data-lake",
+            manifest_key=f"quality-it/run-20261111-gold-01/silver_incremental/{table}/manifest.json",
+            data_prefix=f"quality-it/run-20261111-gold-01/silver_incremental/{table}/runs/",
+            manifest_identity=f"{index:064x}",
+            batch_id=f"{index:032x}",
+            row_count=1,
+        )
+        for index, table in enumerate(DIMENSIONAL_SOURCE_TABLES, start=1)
+    }
+    lineage = build_dimensional_lineage_from_artifacts(artifacts)
+    lineage["source_contract"] = {}
+
+    assert validate_dimensional_lineage(lineage) is True
+    from gold.implementation.dimensional.lineage import source_contract_metadata
+
+    metadata = source_contract_metadata(lineage)
+    assert "snapshot_id" not in metadata["sources"]["orders"]
     assert metadata["sources"]["orders"]["delete_count"] == 0
 
 
