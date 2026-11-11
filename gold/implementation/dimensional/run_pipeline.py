@@ -17,6 +17,7 @@ from common.minio import configure_s3a, create_minio_client
 from common.bounded_e2e_scope import BoundedE2EScopeError, build_bounded_e2e_scope
 from gold.implementation.run_metadata import build_runtime_dimensional_metadata
 from gold.implementation.run_metadata_repository import persist_if_enabled
+from gold.implementation.dimensional.lineage import validate_dimensional_lineage
 
 try:
     from .writer import DRY_RUN, WRITE, run_dimensional_graph
@@ -27,7 +28,8 @@ except ImportError:  # executed by spark-submit as a standalone script
 
 def build_parser():
     parser = argparse.ArgumentParser(description="Run native dimensional Gold Iceberg graph from Silver Parquet")
-    parser.add_argument("--source-lineage", required=True, help="Path to strict dimensional lineage JSON")
+    parser.add_argument("--source-lineage", help="Path to strict dimensional lineage JSON")
+    parser.add_argument("--source-artifact", action="append", default=[], help="Table=JSON verified Silver artifact; repeat for each source table")
     parser.add_argument("--dim-date-start", required=True)
     parser.add_argument("--dim-date-end", required=True)
     parser.add_argument("--mode", choices=(DRY_RUN, WRITE), default=DRY_RUN)
@@ -47,6 +49,31 @@ def load_lineage(path):
         raise ValueError("--source-lineage must be a JSON document or readable path") from exc
 
 
+def load_artifacts(values):
+    artifacts = {}
+    for value in values:
+        if not isinstance(value, str) or "=" not in value:
+            raise ValueError("--source-artifact must use table=JSON format")
+        table, payload = value.split("=", 1)
+        if not table or table in artifacts:
+            raise ValueError(f"Duplicate or empty --source-artifact table: {table!r}")
+        try:
+            artifact = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON for --source-artifact {table}") from exc
+        if not isinstance(artifact, dict):
+            raise ValueError(f"Invalid object for --source-artifact {table}")
+        artifacts[table] = artifact
+    return artifacts
+
+
+def require_verified_graph(verification):
+    """Make completed-graph verification part of WRITE success semantics."""
+    if not isinstance(verification, dict) or verification.get("status") != "VERIFIED":
+        raise RuntimeError("WRITE completed without VERIFIED graph manifest")
+    return verification
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
     scope = None
@@ -61,7 +88,14 @@ def main(argv=None):
             raise SystemExit("--nessie-ref must match the immutable E2E scope")
     elif args.warehouse or args.nessie_ref:
         raise SystemExit("Scoped warehouse/ref require ecommerce-data-lake")
-    lineage = load_lineage(args.source_lineage)
+    if args.source_artifact:
+        from gold.implementation.dimensional.lineage import build_dimensional_lineage_from_artifacts
+        lineage = build_dimensional_lineage_from_artifacts(load_artifacts(args.source_artifact), scope=scope)
+    elif args.source_lineage:
+        lineage = load_lineage(args.source_lineage)
+        validate_dimensional_lineage(lineage, scope=scope)
+    else:
+        raise SystemExit("One of --source-lineage or --source-artifact is required")
     spark = None
     started_at = datetime.now(timezone.utc)
     try:
@@ -76,6 +110,12 @@ def main(argv=None):
             spark, create_minio_client(), args.bucket, lineage,
             dim_date_start=args.dim_date_start, dim_date_end=args.dim_date_end, mode=args.mode, scope=scope,
         )
+        if args.mode == WRITE:
+            from gold.implementation.dimensional.verification import verify_completed_graph
+            verification = verify_completed_graph(
+                result, create_minio_client(), args.bucket, scope=scope,
+            )
+            result["verification"] = require_verified_graph(verification)
         if os.environ.get("GOLD_RUN_METADATA_PERSIST_ENABLED", "false").lower() == "true":
             metadata = build_runtime_dimensional_metadata(
                 lineage=lineage, result=result, mode=args.mode, environment=os.environ, started_at=started_at,

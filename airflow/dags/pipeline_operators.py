@@ -5,8 +5,11 @@ import os
 from datetime import timedelta
 
 from airflow.providers.docker.operators.docker import DockerOperator
+from airflow.providers.standard.operators.empty import EmptyOperator
+from airflow.exceptions import AirflowSkipException
 from docker.types import Mount
 from common.bounded_e2e_scope import BoundedE2EScopeError, build_bounded_e2e_scope
+from pipeline_contracts import TABLES
 
 
 SPARK_IMAGE = os.environ.get("SPARK_IMAGE", "ecommerce-spark:3.5.6")
@@ -69,7 +72,35 @@ def create_incremental_silver_operator(*, table_name, project_path):
     )
 
 
-def create_gold_dimensional_operator(*, source_task_id, project_path, mode="DRY_RUN"):
+class GoldDimensionalDockerOperator(DockerOperator):
+    """Run the complete Gold gate, lineage, write and verification lifecycle."""
+
+    def execute(self, context):
+        from common.runtime_policy import is_feature_enabled
+        from gold.implementation.dimensional.lineage import build_dimensional_lineage_from_artifacts
+        from pipeline_tasks.silver import build_pipeline_summary
+
+        if not is_feature_enabled("GOLD_DIMENSIONAL_ENABLED"):
+            raise AirflowSkipException("GOLD_DIMENSIONAL_ENABLED is false")
+
+        ti = context["ti"]
+        silver_results = {
+            table: ti.xcom_pull(task_ids=f"silver_result_{table}")
+            for table in TABLES
+        }
+        artifacts = {
+            table: ti.xcom_pull(task_ids=f"dimensional_parquet_artifact_{table}")
+            for table in TABLES
+        }
+        config = ti.xcom_pull(task_ids="validate_config")
+        build_pipeline_summary(silver_results, config)
+        bucket = os.environ.get("BRONZE_BUCKET")
+        scope = build_bounded_e2e_scope(os.environ) if bucket == "ecommerce-data-lake" else None
+        build_dimensional_lineage_from_artifacts(artifacts, scope=scope)
+        return super().execute(context)
+
+
+def create_gold_dimensional_operator(*, project_path, mode="DRY_RUN"):
     """Create the single native dimensional graph writer.
 
     This operator has no PostgreSQL/Warehouse dependency; lineage and Silver
@@ -85,13 +116,16 @@ def create_gold_dimensional_operator(*, source_task_id, project_path, mode="DRY_
         except BoundedE2EScopeError as exc:
             raise ValueError(f"Refusing unscoped ecommerce-data-lake Gold operator: {exc}") from exc
     arguments = [
-        "--source-lineage",
-        "{{{{ ti.xcom_pull(task_ids='{}') | tojson }}}}".format(source_task_id),
         "--dim-date-start", os.environ.get("GOLD_DIM_DATE_START", "2020-01-01"),
         "--dim-date-end", os.environ.get("GOLD_DIM_DATE_END", "2035-12-31"),
         "--mode", mode,
         "--bucket", bucket,
     ]
+    for table in TABLES:
+        arguments.extend([
+            "--source-artifact",
+            f"{table}={{{{ ti.xcom_pull(task_ids='dimensional_parquet_artifact_{table}') | tojson }}}}",
+        ])
     extra_environment = {
         "GOLD_DIMENSIONAL_WRITE_ENABLED": os.environ.get("GOLD_DIMENSIONAL_WRITE_ENABLED", "false"),
         "GOLD_RUN_METADATA_PERSIST_ENABLED": os.environ.get("GOLD_RUN_METADATA_PERSIST_ENABLED", "false"),
@@ -122,13 +156,20 @@ def create_gold_dimensional_operator(*, source_task_id, project_path, mode="DRY_
         extra_environment=extra_environment,
         extra_mounts=[Mount(source=project_path + r"\lakehouse", target=f"{SPARK_WORKDIR}/lakehouse", type="bind", read_only=True)],
         do_xcom_push=True,
+        operator_class=GoldDimensionalDockerOperator,
     )
 
 
 def create_gold_dimensional_confirmation_operator(*, table_name):
-    """Non-writing confirmation node for one native dimensional output."""
+    """Expose one published Gold Dim/Fact output in the Airflow graph.
+
+    The atomic Iceberg write is performed by ``gold_dimensional_write``;
+    this node is a lightweight output marker for table-level observability.
+    """
     return EmptyOperator(
         task_id=f"confirm_gold_dimensional_{table_name}",
+        task_display_name=f"gold_dimensional_write_{table_name}",
+        doc_md=f"Gold output marker for `{table_name}`. The atomic Iceberg write is performed upstream.",
         trigger_rule="none_failed_min_one_success",
         retries=0,
     )
@@ -155,6 +196,7 @@ def create_spark_submit_operator(
     retries=IDEMPOTENT_RETRIES,
     do_xcom_push=False,
     xcom_all=False,
+    operator_class=DockerOperator,
 ):
     """Create a consistently configured Spark DockerOperator.
 
@@ -210,7 +252,7 @@ def create_spark_submit_operator(
     ]
     mounts.extend(extra_mounts)
 
-    return DockerOperator(
+    return operator_class(
         task_id=task_id,
         image=SPARK_IMAGE,
         network_mode=DOCKER_NETWORK,

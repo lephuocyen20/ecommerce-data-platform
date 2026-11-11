@@ -121,15 +121,8 @@ def silver_result(table_name, bronze_result):
     return verify_result
 
 
-@task(trigger_rule="all_done", retries=0)
-def pipeline_summary(silver_results: dict):
-    """Validate every table result passed explicitly by the Silver graph.
-
-    The explicit mapping makes all ``silver_result_*`` tasks upstream of this
-    reducer; the context pull remains limited to the shared configuration.
-    """
-    ti = get_current_context()["ti"]
-    config = ti.xcom_pull(task_ids="validate_config")
+def build_pipeline_summary(silver_results: dict, config: dict):
+    """Validate every table result passed explicitly by the Silver graph."""
     if not isinstance(config, dict) or config.get("mode") not in ("DRY_RUN", "WRITE") or not isinstance(config.get("tables"), list):
         raise RuntimeError("PIPELINE_ABORTED: validate_config failed or produced no valid configuration")
     if not isinstance(silver_results, dict) or set(silver_results) != set(config["tables"]):
@@ -149,3 +142,11 @@ def pipeline_summary(silver_results: dict):
     if failed:
         raise RuntimeError(f"Incremental validation incomplete or failed: {sorted(failed)}")
     return {"mode": config["mode"], "status": "PASS", "tables": sorted(completed), "results": completed}
+
+
+@task(trigger_rule="all_done", retries=0)
+def pipeline_summary(silver_results: dict):
+    """Task wrapper retained for compatibility with standalone Silver runs."""
+    ti = get_current_context()["ti"]
+    config = ti.xcom_pull(task_ids="validate_config")
+    return build_pipeline_summary(silver_results, config)

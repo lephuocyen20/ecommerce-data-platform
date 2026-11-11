@@ -14,6 +14,12 @@ except ImportError:
         def task(*_args, **_kwargs):
             return lambda fn: fn
 
+try:
+    from airflow.exceptions import AirflowSkipException
+except ImportError:
+    class AirflowSkipException(Exception):
+        pass
+
 AIRFLOW_PROJECT_PATH = "/opt/airflow/project"
 if AIRFLOW_PROJECT_PATH not in sys.path:
     sys.path.insert(0, AIRFLOW_PROJECT_PATH)
@@ -25,18 +31,20 @@ from gold_gate_policy import decide_gold_dimensional_gate
 from gold.implementation.dimensional.lineage import build_parquet_lineage_artifact
 
 
-@task.branch(retries=0)
-def gold_dimensional_gate(pipeline_result: dict):
-    """Keep the native dimensional graph opt-in and fail closed by default."""
-    return decide_gold_dimensional_gate(
-        pipeline_result,
-        enabled=is_feature_enabled("GOLD_DIMENSIONAL_ENABLED"),
-    )
+@task(retries=0)
+def gold_dimensional_gate(silver_results: dict, dimensional_artifacts: dict, config: dict):
+    """Validate Silver inputs and skip the Gold branch when it is disabled."""
+    from pipeline_tasks.silver import build_pipeline_summary
 
-
-@task(task_id="skip_gold_dimensional", retries=0)
-def skip_gold_dimensional():
-    return {"status": "SKIPPED", "reason": "GOLD_DIMENSIONAL_DISABLED"}
+    if not isinstance(dimensional_artifacts, dict) or set(dimensional_artifacts) != set(silver_results or {}):
+        raise RuntimeError("Dimensional Gold requires all verified Silver artifacts")
+    pipeline_result = build_pipeline_summary(silver_results, config)
+    if not is_feature_enabled("GOLD_DIMENSIONAL_ENABLED"):
+        raise AirflowSkipException("GOLD_DIMENSIONAL_ENABLED is false")
+    decision = decide_gold_dimensional_gate(pipeline_result, enabled=True)
+    if decision != "resolve_gold_dimensional_lineage":
+        raise RuntimeError(f"Unexpected Gold gate decision: {decision}")
+    return pipeline_result
 
 
 @task(retries=0)

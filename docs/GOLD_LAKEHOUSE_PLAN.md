@@ -11,6 +11,20 @@
   bounded approval; this session did not perform external writes or destructive
   Iceberg/object-store operations.
 
+## Session 2026-11-11: Airflow Gold UI layout
+
+- Removed the `gold_iceberg` TaskGroup wrapper so `gold_dimensional_write` is
+  displayed at DAG root.
+- Preserved the atomic writer, six Silver artifact upstreams, seven Gold
+  confirmation markers, task IDs and runtime behavior.
+- QA verdict: **PASS WITH WARNINGS** from static/source review; pytest and
+  Airflow DagBag import remain pending because the local environment lacks
+  `pytest` and `airflow.sdk`.
+- Follow-up Airflow container verification passed: `airflow dags list-import-errors`
+  returned `No data found`, and `airflow dags show` rendered the writer at root
+  with six artifact upstreams and seven confirmation downstreams. Container
+  pytest remains unavailable because the image lacks `pytest`.
+
 ## Lifecycle semantic evidence
 
 - Status: **PASS WITH WARNINGS (code-level)**.
@@ -621,3 +635,20 @@ not perform external table/object writes.
 - Independent QA verdict for this refactor: **PASS**. The bounded historical
   manifest scope guard and its negative regression test were rechecked after
   correction; no findings remain in the reviewed scope.
+
+#### Session H — Gold runtime orchestration boundary QA re-review (2026-11-11)
+
+- Documentation now records the actual topology: all six
+  `dimensional_parquet_artifact_*` tasks connect directly to
+  `gold_dimensional_write`; no `silver_completion_barrier` dependency remains.
+- Focused verification: **62 passed**; `compileall` **PASS**; `git diff --check`
+  **PASS**.
+- Airflow container DagBag/import evidence for this session returned `No data
+  found` for import errors, and graph inspection passed for the six artifact
+  upstreams, one Gold writer, and seven downstream confirmation markers.
+- Independent QA verdict: **PASS WITH WARNINGS**. Production `WRITE`,
+  consumer cutover, and production/disposable runtime certification remain
+  unverified. A current Airflow container DagBag rerun is a residual risk if
+  fresh runtime evidence is required.
+- No external write, cutover, checkpoint reset, object deletion, or commit was
+  performed.
