@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timezone
+from datetime import datetime, timezone
 
 from ingestion.incremental.watermark import watermark_matches_batch_start
 
