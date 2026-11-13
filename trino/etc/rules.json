@@ -1,0 +1,30 @@
+{
+  "catalogs": [
+    {
+      "user": "metabase",
+      "catalog": "lakehouse",
+      "allow": "read-only"
+    },
+    {
+      "catalog": ".*",
+      "allow": "none"
+    }
+  ],
+  "schemas": [
+    {
+      "user": "metabase",
+      "catalog": "lakehouse",
+      "schema": "gold_run_20261112_gold_06",
+      "owner": false
+    }
+  ],
+  "tables": [
+    {"user": "metabase", "catalog": "lakehouse", "schema": "gold_run_20261112_gold_06", "table": "dim_date", "privileges": ["SELECT"]},
+    {"user": "metabase", "catalog": "lakehouse", "schema": "gold_run_20261112_gold_06", "table": "dim_customer", "privileges": ["SELECT"]},
+    {"user": "metabase", "catalog": "lakehouse", "schema": "gold_run_20261112_gold_06", "table": "dim_product", "privileges": ["SELECT"]},
+    {"user": "metabase", "catalog": "lakehouse", "schema": "gold_run_20261112_gold_06", "table": "fact_orders", "privileges": ["SELECT"]},
+    {"user": "metabase", "catalog": "lakehouse", "schema": "gold_run_20261112_gold_06", "table": "fact_order_items", "privileges": ["SELECT"]},
+    {"user": "metabase", "catalog": "lakehouse", "schema": "gold_run_20261112_gold_06", "table": "fact_payments", "privileges": ["SELECT"]},
+    {"user": "metabase", "catalog": "lakehouse", "schema": "gold_run_20261112_gold_06", "table": "fact_shipments", "privileges": ["SELECT"]}
+  ]
+}
