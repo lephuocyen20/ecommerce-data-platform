@@ -12,15 +12,31 @@ Gold is the canonical lakehouse analytical layer: conformed dimensions and facts
 | `gold.fact_payments` | one row per payment | Silver payments (`status` → `payment_status`) |
 | `gold.fact_shipments` | one row per shipment | Silver shipments |
 
-`fact_orders` holds order-level measures only. Shipping fees remain shipment-grain and must not be copied onto order items. Unknown dimensions use surrogate key `-1`; Type 2 is explicitly out of scope for v1.
+`fact_orders` holds order-level measures only. Shipping fees remain shipment-grain and must not be copied onto order items. Unknown dimensions use surrogate key `-1`; Type 2 is explicitly out of scope for v1. All seven outputs have a declared business grain and merge key in `gold/implementation/dimensional/contracts.py`; measures are additive unless their contract says otherwise.
 
 ## Lifecycle revenue semantics
 
 Base monetary measures remain non-negative and are never physically removed.
-The single `signed_revenue` measure carries lifecycle direction: cancelled or
-deleted orders are negative, and refunded payments are negative. Native Gold
-transformations preserve raw/base amounts and derive the same signed measure;
-no second discount/refund subtraction is performed.
+`fact_payments.signed_revenue` carries payment lifecycle direction: `REFUNDED`
+is negative and other payment statuses are positive. `fact_orders` deliberately
+does not contain `signed_revenue`; order cancellation/deletion sign ownership is
+an unresolved business decision and must not be inferred or added without an
+approved contract. Native transformations preserve raw/base amounts and do not
+perform a second discount/refund subtraction.
+
+## Semantic parity and sign-off
+
+Dimensional reconciliation helpers compare deterministic rows at the declared
+grain for orders, order items, payments, and shipments. They fail closed on
+missing/extra columns, missing or duplicate keys, mismatched measures, and
+invalid lifecycle signs. These are code-level assertions only; business and
+analytics owners must still sign off metric ownership, additivity, and downstream
+parity before consumer cutover.
+
+`fact_payments.order_id` and `fact_shipments.order_id` are mandatory logical
+foreign keys to `fact_orders.order_id`; quality validation rejects orphan rows.
+Shipment lifecycle remains status-only and shipment-grain fees are not copied to
+orders or order items.
 
 # Native Iceberg writer
 

@@ -386,6 +386,11 @@ not perform external table/object writes.
   certification: business sign-off, production/disposable certification,
   consumer cutover and maintenance approval are still intentionally pending.
 
+  - Local BI stable-ref evidence: **PASS**. Nessie `TAG/bi_gold_current` now
+    points to the verified run-06 hash; Trino read-only verification returned
+    one `fact_orders` row and `net_amount=24.00`. This is local catalog
+    promotion only; it does not claim production certification or cutover.
+
 ### Session F — Full bounded Airflow main-flow execution (2026-11-11)
 
 - Fixed bounded attestation identity propagation in
@@ -692,3 +697,83 @@ not perform external table/object writes.
   performed.
 - QA verdict: **PASS WITH WARNINGS**. The full suite still includes separate
   Windows/Spark environment failures; those are not caused by this cleanup.
+## Session closure — bounded recovery run-06 (2026-11-13)
+
+- Status: **PASS WITH WARNINGS** for the approved local bounded scope only.
+- Run `run-20261112-gold-06` published and independently verified all seven
+  Gold tables, including positive `fact_orders` snapshot/file/row evidence.
+- Production certification, shared-data migration, consumer cutover and
+  maintenance operations remain out of scope and unapproved.
+
+## Session J — Hive Metastore local smoke (2026-11-13)
+
+- Static contract and independent QA: **PASS**.
+- Isolated Hive Metastore runtime smoke: **PASS**. Pinned Hive 4.0.1,
+  PostgreSQL 16.4 metadata DB, and Trino 476 validation configuration remain
+  separate from the active Nessie/Trino/Metabase path.
+- JDBC 42.7.4 was checksum-pinned; schema initialization, Metastore startup,
+  and TCP `hive-metastore:9083` probe passed.
+- Trino validation against Hive, run-06 table registration, Gold/MinIO parity,
+  and any active catalog or Metabase cutover remain deferred and unapproved.
+
+- Hive Phase 2 runtime attempt: Trino validation and bounded REST dry-run passed;
+  `register_table` was not applied because the least-privilege registration
+  policy rejected metadata table creation. Hive parity and cutover remain
+  **BLOCKED/UNVERIFIED**, with no data or Nessie mutation.
+
+- Final blocker: Gold metadata uses `s3a://`; Trino registration could not load
+  `org.apache.hadoop.fs.s3a.S3AFileSystem`, while Spark registration was
+  incompatible with Hive 4 Thrift. No metadata normalization or catalog
+  cutover is approved.
+
+- Persistent REST Catalog PostgreSQL runtime health: **PASS**. Custom JDBC
+  image, PostgreSQL healthcheck, REST startup and internal `/v1/config` probe
+  passed. Gold registration/parity and BI cutover remain deferred.
+- Independent QA for the persistent REST runtime-health scope: **PASS**.
+  Focused contract tests (`8 passed`), `compileall`, `git diff --check`, and
+  the recorded Docker/JDBC evidence passed. Next action requires separate
+  approval for bounded run-06 registration and Trino parity only.
+- Persistent REST run-06 registration and Trino parity: **PASS**. All seven
+  certified tables were registered metadata-only and matched source REST on
+  table set, schema, row count, snapshot ID, file count and physical bytes.
+  Trino validation was read-only; active Nessie/Metabase configuration and
+  consumer cutover remain unchanged.
+- Independent QA for REST registration/parity: **PASS**, no open findings.
+  Endpoint allowlists, metadata-only registration, read-only Trino policy and
+  no-cutover boundary were verified. REST phase is complete; any BI consumer
+  trial requires a separate approval.
+- Isolated Metabase REST BI trial: **PASS**. Native `presto-jdbc` queried the
+  persistent REST-backed Trino catalog and returned the expected `fact_orders`
+  count of `1`. Trial Metabase/PostgreSQL metadata is isolated; active BI
+  datasource and dashboards remain unchanged.
+
+## Session L â€” approved local BI artifact cleanup (2026-11-13)
+
+- Retired obsolete Hive Metastore smoke/Phase 2 assets and SQLite REST
+  proof/validation assets.
+- Preserved persistent PostgreSQL REST Catalog/validation, isolated Metabase
+  REST trial, active Nessie/Trino/Metabase, Gold/MinIO objects, checkpoints,
+  and all protected metadata volumes.
+- No protected data/object or metadata-volume deletion, catalog reset, or
+  cutover occurred; obsolete Hive/plugin volumes are explicitly handled below.
+- Cleanup verification: **PASS WITH WARNINGS / QA CLOSED**. Focused
+  retained-path contracts passed (`15 passed`), `compileall` and
+  `git diff --check` passed; no protected Gold/MinIO/Nessie volume or
+  checkpoint was deleted.
+- Follow-up cleanup removed only the obsolete Hive and Metabase plugin volumes;
+  active/trial Metabase health checks remain `{"status":"ok"}`. Gold,
+  MinIO, Nessie, metadata and REST trial volumes were retained.
+
+## Session M â€” shared certified Gold registry (2026-11-13)
+
+- Added `gold/implementation/gold_table_registry.py` for the exact seven-table
+  run-06 identity, snapshot IDs and expected row counts.
+- Dimensional Gold write order, BI promotion, REST registration/parity, Trino
+  contracts and selected tests now reuse the registry without changing schema,
+  snapshot, endpoint, read-only, or fallback behavior.
+- Added a shared local HTTP endpoint validator for bounded REST/Metabase trial
+  clients; Nessie URI validation remains specialized for `/api/v2` semantics.
+- Static/unit verification and compatibility tests are required before any
+  runtime phase; no data/catalog mutation is part of this refactor.
+- Verification: focused registry/Gold/REST/Trino/Metabase compatibility suite
+  **42 passed**, `compileall` **PASS**, and `git diff --check` **PASS**.

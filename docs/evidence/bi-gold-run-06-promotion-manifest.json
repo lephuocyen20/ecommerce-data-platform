@@ -1,0 +1,18 @@
+{
+  "status": "VERIFIED",
+  "can_write": false,
+  "run_id": "run-20261112-gold-06",
+  "prefix": "quality-it/run-20261112-gold-06/",
+  "nessie_ref": "quality_it_run_20261112_gold_06",
+  "nessie_hash": "6e5d384db96bbe8798ae270dd8f2416be396c7523ae21df5c70763f2caebd46e",
+  "schema": "gold_run_20261112_gold_06",
+  "tables": [
+    {"table": "dim_date", "status": "VERIFIED", "snapshot_id": 2340245983998241199},
+    {"table": "dim_customer", "status": "VERIFIED", "snapshot_id": 4957293444030653664},
+    {"table": "dim_product", "status": "VERIFIED", "snapshot_id": 5087015407247836870},
+    {"table": "fact_orders", "status": "VERIFIED", "snapshot_id": 5274292672790927131},
+    {"table": "fact_order_items", "status": "VERIFIED", "snapshot_id": 3223103126187800136},
+    {"table": "fact_payments", "status": "VERIFIED", "snapshot_id": 9142204852940102980},
+    {"table": "fact_shipments", "status": "VERIFIED", "snapshot_id": 43752055579177804}
+  ]
+}

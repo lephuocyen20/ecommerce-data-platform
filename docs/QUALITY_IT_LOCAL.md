@@ -2,6 +2,18 @@
 
 ## Phase C local runtime proof (DRY_RUN)
 
+## Read-only query/demo contract
+
+The one-command entry point is `scripts/run_local_e2e_demo.ps1`. Its
+`preflight`, `run`, and `verify` modes are fail-closed checks only in this
+implementation: they never invoke Docker, Spark, Nessie, MinIO, PostgreSQL or
+a pipeline writer. The JSON contract names six Silver inputs, seven Gold
+outputs, `DRY_RUN=true`, `can_write=false`, and runtime verification status.
+
+For local BI inspection, use native Metabase → Trino with the pinned
+`bi_gold_current` ref and run-06 schema. Streamlit and the repository-local
+`gold.query` presentation layer were retired in Batch 3.
+
 The bounded runner `tests/run_phase_c_local_runtime.py` validates late-correction
 overlap/reprocess intent, rejects schema drift, and enforces tombstone-only
 policy. It is hard-scoped to bucket `ecommerce-quality-it`, a local quality-it
@@ -86,3 +98,17 @@ Run the contract suite without Docker or object-store mutation:
 
 Do not inject failures into the live local bucket; use the fake-client tests for
 recovery behavior. These checks do not constitute production certification.
+
+## Read-only runtime certification report
+
+`gold.implementation.dimensional.verification.build_certification_report` builds
+a deterministic report from writer/verification evidence without creating a
+Spark, MinIO, Nessie, PostgreSQL, or network client. It records run, code/config,
+lineage, bucket/prefix/ref, graph identity, all seven outputs, snapshot/row-count
+fields, verification status, and recovery classification. `DRY_RUN` is always
+reported with `can_write=false`; partial output remains
+`PARTIAL_REQUIRES_RECONCILIATION`, with no cleanup or rollback.
+Certification is fail-closed: `certified=true` requires a complete graph plus
+each table's pinned `snapshot_id`, `file_count`/`file_bytes`, and read-back
+`row_count` evidence. `ALREADY_PUBLISHED` reads the completed graph and table
+manifests read-only; it does not infer completion from `tables=[]`.

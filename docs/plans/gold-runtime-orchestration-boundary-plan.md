@@ -247,3 +247,44 @@ Do not mark runtime certification or Gold WRITE cutover complete.
 - Independent QA/runtime status remains **BLOCKED**. The remaining action is
   code-level diagnosis of the first-write failure and a new reviewed fix;
   do not retry either partial run or perform cleanup/rollback.
+
+## Bounded recovery run-05 evidence (2026-11-12)
+
+- Added the explicit immutable run ID `run-20261112-gold-05` to the fixture
+  allowlist; independent QA verdict: **PASS**. Focused tests passed (`13
+  passed`), compileall and diff checks passed.
+- The bounded fixture WRITE completed for all six Silver inputs under the new
+  exact prefix `quality-it/run-20261112-gold-05/`.
+- Gold WRITE stopped before publishing any target table because the required
+  Nessie ref `quality_it_run_20261112_gold_05` did not exist. No Gold table
+  was published; no cleanup, delete, overwrite, rollback, compaction or
+  cutover was performed.
+- Run-05 is now intentionally quarantined/partial and must not be rerun.
+- Status: **BLOCKED — next retry requires a new immutable run ID, creation of
+  its Nessie ref before Gold WRITE, a reviewed allowlist update, and explicit
+  bounded runtime approval.**
+
+## Bounded recovery run-06 evidence (2026-11-13)
+
+- Added exact immutable run ID `run-20261112-gold-06` to the fixture
+  allowlist; coder checks passed (`14 passed`) and independent QA passed
+  (`5 passed`).
+- Created Nessie ref `quality_it_run_20261112_gold_06` from `main` before any
+  fixture or Gold write.
+- Bounded fixture WRITE created six Silver inputs under exactly
+  `quality-it/run-20261112-gold-06/`.
+- Gold WRITE returned `PUBLISHED`; completed graph verification returned
+  `VERIFIED` for all seven tables. Runtime metadata persistence remained
+  disabled (`GOLD_RUN_METADATA_PERSIST_ENABLED=false`).
+- Independent read-only verification: Nessie ref HTTP 200 with head hash
+  `6e5d384db96bbe8798ae270dd8f2416be396c7523ae21df5c70763f2caebd46e`;
+  MinIO inventory contained 70 objects / 158575 bytes, including 9 Gold,
+  37 lakehouse and 24 Silver objects.
+- `fact_orders` evidence: snapshot `5274292672790927131`, 1 file, 3088
+  bytes, 1 row; read-back status `PASS`.
+- Independent QA verdict: **PASS WITH WARNINGS**. Run-05 remains quarantined
+  with no published Gold tables; historical byte-for-byte immutability cannot
+  be proven without a pre-run baseline. No cleanup, delete, rollback,
+  compaction, cutover or production write was performed.
+- Status: **PASS WITH WARNINGS — bounded local recovery is verified; this is
+  not production certification or consumer cutover approval.**
