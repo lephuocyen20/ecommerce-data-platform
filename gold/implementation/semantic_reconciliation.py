@@ -38,8 +38,15 @@ def _canonical(row, columns):
     return json.dumps({name: _normalise(row[name], data_type) for name, data_type in columns.items()}, sort_keys=True, separators=(",", ":"))
 
 
-def reconcile_rows(dataset_name, legacy_rows, iceberg_rows, contract, *, numeric_tolerance=Decimal("0")):
-    """Compare materialized rows against an explicit semantic contract."""
+def reconcile_rows(dataset_name, legacy_rows, iceberg_rows, contract, *, numeric_tolerance=Decimal("0"), strict_columns=False):
+    """Compare materialized rows against an explicit semantic contract.
+
+    ``strict_columns=True`` is mandatory for dimensional parity and fails closed
+    on missing or extra columns.  The default compatibility boundary is kept
+    only for legacy report marts whose contracts historically allowed a derived
+    column to be absent from both materializations; those callers are covered by
+    the report-mart tests and are not certification evidence.
+    """
     if not isinstance(numeric_tolerance, Decimal) or numeric_tolerance < 0:
         raise ValueError("numeric_tolerance must be a non-negative Decimal")
     keys, columns = contract["primary_key"], contract["columns"]
@@ -52,6 +59,11 @@ def reconcile_rows(dataset_name, legacy_rows, iceberg_rows, contract, *, numeric
     missing_keys = set(keys) - present
     if missing_keys:
         raise GoldSemanticMismatch(f"Missing required primary key columns: {sorted(missing_keys)}")
+    if strict_columns:
+        for label, rows in (("legacy", legacy_rows), ("iceberg", iceberg_rows)):
+            for row in rows:
+                if set(row) != set(columns):
+                    raise GoldSemanticMismatch(f"{label} schema does not match semantic contract")
     compare_columns = {name: data_type for name, data_type in columns.items() if name in present}
 
     def index(rows, label):

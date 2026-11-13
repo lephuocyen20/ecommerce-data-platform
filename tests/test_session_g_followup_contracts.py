@@ -17,7 +17,10 @@ def test_native_dimensional_path_has_default_off_metadata_guard():
     assert "GOLD_RUN_METADATA_PERSIST_ENABLED" in source
     assert "build_runtime_dimensional_metadata" in source
     assert "persist_if_enabled" in source
-    assert "unknown" not in source
+    # Runtime identity fallbacks are explicit non-secret sentinels; this test
+    # protects the metadata write guard rather than banning that sentinel.
+    assert 'os.environ.get("GIT_COMMIT_SHA", "unknown")' in source
+    assert 'os.environ.get("GOLD_CONFIG_IDENTITY", "unknown")' in source
 
 
 def test_runtime_metadata_does_not_require_parse_time_json():

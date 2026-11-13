@@ -17,7 +17,8 @@ from common.minio import configure_s3a, create_minio_client
 from common.bounded_e2e_scope import BoundedE2EScopeError, build_bounded_e2e_scope
 from gold.implementation.run_metadata import build_runtime_dimensional_metadata
 from gold.implementation.run_metadata_repository import persist_if_enabled
-from gold.implementation.dimensional.lineage import validate_dimensional_lineage
+from gold.implementation.dimensional.lineage import validate_dimensional_lineage, dimensional_lineage_identity
+from gold.implementation.dimensional.verification import build_certification_report
 
 try:
     from .writer import DRY_RUN, WRITE, run_dimensional_graph
@@ -106,17 +107,32 @@ def main(argv=None):
                        .config("spark.sql.catalog.lakehouse.ref", scope.nessie_ref))
         spark = builder.getOrCreate()
         configure_s3a(spark)
+        minio_client = create_minio_client()
         result = run_dimensional_graph(
-            spark, create_minio_client(), args.bucket, lineage,
+            spark, minio_client, args.bucket, lineage,
             dim_date_start=args.dim_date_start, dim_date_end=args.dim_date_end, mode=args.mode, scope=scope,
         )
+        result["mode"] = args.mode
         if args.mode == WRITE:
             from gold.implementation.dimensional.verification import verify_completed_graph
             verification = verify_completed_graph(
                 result, create_minio_client(), args.bucket, scope=scope,
             )
             result["verification"] = require_verified_graph(verification)
-        if os.environ.get("GOLD_RUN_METADATA_PERSIST_ENABLED", "false").lower() == "true":
+        result["certification_report"] = build_certification_report(
+            run_id=os.environ.get("LAKEHOUSE_E2E_RUN_ID", "local"),
+            code_identity=os.environ.get("GIT_COMMIT_SHA", "unknown"),
+            config_identity=os.environ.get("GOLD_CONFIG_IDENTITY", "unknown"),
+            lineage_identity=dimensional_lineage_identity(lineage, scope=scope),
+            bucket=args.bucket,
+            prefix=scope.prefix if scope is not None else None,
+            ref=scope.nessie_ref if scope is not None else "main",
+            writer_result=result,
+            verification=result.get("verification"),
+            client=minio_client,
+            scope=scope,
+        )
+        if args.mode == WRITE and os.environ.get("GOLD_RUN_METADATA_PERSIST_ENABLED", "false").lower() == "true":
             metadata = build_runtime_dimensional_metadata(
                 lineage=lineage, result=result, mode=args.mode, environment=os.environ, started_at=started_at,
             )

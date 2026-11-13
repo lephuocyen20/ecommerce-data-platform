@@ -124,10 +124,20 @@ def _patch_runner_runtime(monkeypatch, runner, *, events, verification=None):
     monkeypatch.setattr(runner, "configure_s3a", lambda _spark: events.append("configure_s3a"))
     monkeypatch.setattr(runner, "create_minio_client", lambda: events.append("minio.create") or object())
     monkeypatch.setattr(runner, "validate_dimensional_lineage", lambda _lineage, scope=None: True)
+    monkeypatch.setattr(runner, "dimensional_lineage_identity", lambda _lineage, scope=None: "l" * 64)
+    output_tables = [
+        {"table": table, "manifest": {"snapshot_id": index, "quality": {"readback": {
+            "status": "PASS", "snapshot_id": index, "file_count": 1, "file_bytes": 1, "row_count": 1,
+        }}}}
+        for index, table in enumerate(("dim_date", "dim_customer", "dim_product", "fact_orders",
+                                       "fact_order_items", "fact_payments", "fact_shipments"), start=1)
+    ]
     monkeypatch.setattr(
         runner,
         "run_dimensional_graph",
-        lambda *_args, **_kwargs: events.append("run_dimensional_graph") or {"status": "WRITE"},
+        lambda *_args, **_kwargs: events.append("run_dimensional_graph") or {
+            "status": "WRITE", "graph": {"identity": "g" * 64}, "tables": output_tables,
+        },
     )
     if verification is not None:
         verification_module = __import__(
@@ -159,6 +169,19 @@ def test_main_dry_run_does_not_verify_completed_graph(monkeypatch):
 
     assert "run_dimensional_graph" in events
     assert "verify_completed_graph" not in events
+
+
+def test_main_dry_run_never_persists_postgres_metadata_even_when_enabled(monkeypatch):
+    runner = _runner_module()
+    events = []
+    _patch_runner_runtime(monkeypatch, runner, events=events)
+    monkeypatch.setenv("GOLD_RUN_METADATA_PERSIST_ENABLED", "true")
+    monkeypatch.setattr(runner, "build_certification_report", lambda **_kwargs: {"certified": False})
+    monkeypatch.setattr(runner, "persist_if_enabled", lambda *args, **kwargs: pytest.fail("DRY_RUN must not persist metadata"))
+
+    result = runner.main(_runner_args(runner, runner.DRY_RUN))
+
+    assert result["run_metadata"] == {"persisted": False, "reason": "GOLD_RUN_METADATA_PERSIST_ENABLED=false"}
 
 
 def test_main_write_verifies_only_after_dimensional_graph(monkeypatch):

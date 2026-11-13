@@ -55,6 +55,40 @@ def test_write_feature_flag_defaults_to_off(monkeypatch):
     assert_write_allowed(WRITE)
 
 
+def test_read_table_readback_uses_pinned_snapshot_for_rows_not_current_head():
+    from types import SimpleNamespace
+    import gold.implementation.dimensional.writer as writer
+
+    class Reader:
+        def __init__(self):
+            self.calls = []
+
+        def format(self, value):
+            self.calls.append(("format", value))
+            return self
+
+        def option(self, key, value):
+            self.calls.append(("option", key, value))
+            return self
+
+        def load(self, identifier):
+            self.calls.append(("load", identifier))
+            if identifier.endswith(".files"):
+                return SimpleNamespace(selectExpr=lambda *_: SimpleNamespace(first=lambda: SimpleNamespace(file_count=1, file_bytes=10)))
+            return SimpleNamespace(count=lambda: 3)
+
+    class Spark:
+        read = Reader()
+
+    spark = Spark()
+    evidence = writer.read_table_readback(spark, "fact_orders", 7)
+    assert evidence["snapshot_id"] == 7
+    assert evidence["row_count"] == 3
+    assert ("load", "lakehouse.gold.fact_orders.files") in spark.read.calls
+    assert ("load", "lakehouse.gold.fact_orders") in spark.read.calls
+    assert ("option", "snapshot-id", 7) in spark.read.calls
+
+
 def test_shared_bucket_requires_explicit_bounded_scope(monkeypatch):
     monkeypatch.setenv("GOLD_DIMENSIONAL_WRITE_ENABLED", "true")
     with pytest.raises(DimensionalWriteError, match="bounded E2E scope"):
@@ -128,6 +162,7 @@ def test_table_write_failure_includes_table_exception_and_published_tables(monke
     ))
     monkeypatch.setattr(writer, "merge_table", lambda *args: None)
     monkeypatch.setattr(writer, "current_snapshot_id", lambda *args: 1)
+    monkeypatch.setattr(writer, "read_table_readback", lambda *args: {"status": "PASS", "snapshot_id": 1, "file_count": 1, "file_bytes": 1, "row_count": 1})
     monkeypatch.setattr(writer, "publish_manifest", lambda *args: "PUBLISHED")
 
     with pytest.raises(DimensionalWriteError) as caught:

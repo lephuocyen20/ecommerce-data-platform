@@ -28,15 +28,16 @@ def validate_table_frame(name, dataframe, dimensions=None):
         surrogate = key[0]
         if dataframe.where(F.col(surrogate) == UNKNOWN_KEY).count() != 1:
             raise DimensionalQualityError(f"{name} requires exactly one unknown member")
+    if name in {"fact_orders", "fact_order_items", "fact_payments", "fact_shipments"} and dimensions is not None:
+        dimension_columns = {"customer_key": "customer_key", "order_date_key": "date_key", "product_key": "product_key", "order_id": "order_id"}
+        from .contracts import FACTS
+        for column, dimension in FACTS[name]["foreign_keys"].items():
+            valid = dimensions[dimension].select(F.col(dimension_columns[column]).alias(column))
+            if dataframe.join(valid, column, "left_anti").limit(1).count():
+                raise DimensionalQualityError(f"{name} has an unresolved {column} foreign key")
     if name == "fact_orders":
         if dataframe.where(F.col("customer_key").isNull()).limit(1).count():
             raise DimensionalQualityError("fact_orders customer_key cannot be null")
-        if dimensions is not None:
-            for column, dimension, dimension_column in (("customer_key", "dim_customer", "customer_key"), ("order_date_key", "dim_date", "date_key")):
-                if dimension in dimensions:
-                    valid = dimensions[dimension].select(F.col(dimension_column).alias(column))
-                    if dataframe.join(valid, column, "left_anti").limit(1).count():
-                        raise DimensionalQualityError(f"fact_orders has an unresolved {column} foreign key")
         for column in ("line_count", "item_count", "gross_amount", "discount_amount", "net_amount"):
             if dataframe.where(F.col(column) < 0).limit(1).count():
                 raise DimensionalQualityError(f"fact_orders measure {column} cannot be negative")
@@ -52,4 +53,9 @@ def validate_table_frame(name, dataframe, dimensions=None):
             raise DimensionalQualityError("fact_order_items net_amount must equal gross_amount - discount_amount")
     if name == "fact_payments" and dataframe.where(F.col("payment_amount") < 0).limit(1).count():
         raise DimensionalQualityError("fact_payments payment_amount cannot be negative")
+    if name == "fact_payments" and dataframe.where(
+        F.when(F.upper(F.col("payment_status")) == "REFUNDED", -F.col("payment_amount"))
+        .otherwise(F.col("payment_amount")) != F.col("signed_revenue")
+    ).limit(1).count():
+        raise DimensionalQualityError("fact_payments signed_revenue violates REFUNDED lifecycle sign")
     return {"table": name, "status": "PASS", "row_count": dataframe.count()}

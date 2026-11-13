@@ -62,6 +62,25 @@ Bounded Iceberg E2E writes require the explicit `LAKEHOUSE_E2E_*` approval and
 scope described in [`AGENTS.md`](AGENTS.md). The certified run-04 is a local
 portfolio demonstration, not a production deployment claim.
 
+The read-only local demo contract can be checked without Docker, Spark, Nessie,
+MinIO, PostgreSQL, or any runtime write:
+
+```powershell
+$env:QUALITY_IT_RUN_ID = 'local-demo-01'
+$env:QUALITY_IT_BUCKET = 'ecommerce-quality-it'
+$env:QUALITY_IT_PREFIX = 'quality-it/local-demo-01/'
+$env:NESSIE_URI = 'http://127.0.0.1:19130/api/v2'
+$env:NESSIE_REF = 'main'
+$env:GOLD_DIMENSIONAL_WRITE_ENABLED = 'false'
+$env:GOLD_RUN_MODE = 'DRY_RUN'
+.\scripts\run_local_e2e_demo.ps1 -Mode preflight
+```
+
+Local BI uses native Metabase → Trino against the pinned local Gold catalog.
+The native Metabase contract and Trino overlay are documented in
+`docs/RUNBOOK.md`; no Streamlit or repository-local semantic query layer is
+active.
+
 ## Development status
 
 The implementation is organized into independently reviewable local commits.

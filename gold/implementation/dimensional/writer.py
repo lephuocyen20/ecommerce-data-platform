@@ -104,6 +104,38 @@ def current_snapshot_id(spark, table, scope=None):
     return rows[0].snapshot_id
 
 
+def read_table_readback(spark, table, snapshot_id, scope=None):
+    """Read-only snapshot/file/row evidence for a completed Gold table."""
+    identifier = _identifier(table, scope)
+    try:
+        # Iceberg's `.files` metadata table is current-snapshot scoped when
+        # queried directly. Use the documented reader option to pin the
+        # metadata table itself to the requested historical snapshot.
+        pinned_files = (
+            spark.read.format("iceberg")
+            .option("snapshot-id", snapshot_id)
+            .load(f"{identifier}.files")
+        )
+        file_row = pinned_files.selectExpr(
+            "count(*) AS file_count",
+            "coalesce(sum(file_size_in_bytes), 0) AS file_bytes",
+        ).first()
+        # The data read must use the same pinned snapshot, never table head.
+        pinned_rows = (
+            spark.read.format("iceberg")
+            .option("snapshot-id", snapshot_id)
+            .load(identifier)
+        )
+        row_count = pinned_rows.count()
+    except Exception as exc:
+        raise DimensionalWriteError(
+            f"Pinned snapshot row read-back is unavailable for {table}@{snapshot_id}"
+        ) from exc
+    if file_row is None or file_row.file_count <= 0 or row_count < 0:
+        raise DimensionalWriteError(f"Read-back evidence is incomplete for {table}")
+    return {"status": "PASS", "snapshot_id": snapshot_id, "file_count": int(file_row.file_count), "file_bytes": int(file_row.file_bytes), "row_count": int(row_count)}
+
+
 def build_graph_frames(spark, sources, *, dim_date_start, dim_date_end):
     frames = {
         "dim_date": build_dim_date(spark, dim_date_start, dim_date_end),
@@ -192,7 +224,9 @@ def run_dimensional_graph(spark, client, bucket, lineage, *, dim_date_start, dim
             assert_graph_fence(client, bucket, graph, fence, scope)
             create_target_table(spark, table, scope)
             merge_table(spark, table, frames[table], scope)
-            manifest = build_table_manifest(graph, table=table, snapshot_id=current_snapshot_id(spark, table, scope), quality=quality[table])
+            snapshot_id = current_snapshot_id(spark, table, scope)
+            table_quality = {**quality[table], "readback": read_table_readback(spark, table, snapshot_id, scope)}
+            manifest = build_table_manifest(graph, table=table, snapshot_id=snapshot_id, quality=table_quality)
             state = publish_manifest(client, bucket, manifest, table_manifest_key(graph["identity"], table, scope))
             published.append({"table": table, "state": state, "manifest": manifest})
     except Exception as exc:

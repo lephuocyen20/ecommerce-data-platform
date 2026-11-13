@@ -1,5 +1,7 @@
 """Declarative contracts for the first Iceberg Gold star-schema slice."""
 
+from gold.implementation.gold_table_registry import GOLD_TABLES
+
 DIMENSIONAL_GOLD_VERSION = "1.0"
 UNKNOWN_KEY = -1
 DIMENSIONAL_CATALOG = "lakehouse"
@@ -12,26 +14,31 @@ DIMENSIONAL_SEMANTIC_CONTRACT = {
     "owner": "analytics",
     "timezone": "UTC",
     "date_semantics": "date_key is YYYYMMDD for the UTC calendar date",
+    "unknown_member_key": UNKNOWN_KEY,
+    "type_2_dimensions": False,
+    "business_signoff_required": True,
 }
 
 DIMENSIONS = {
-    "dim_date": {"grain": ("date_key",), "natural_key": ("calendar_date",), "sources": (), "type": "generated", "timezone":"UTC", "required":("date_key","calendar_date")},
-    "dim_customer": {"grain": ("customer_key",), "natural_key": ("customer_id",), "sources": ("customers",), "type": "type_1", "timezone":"UTC", "required":("customer_key","customer_id"), "foreign_keys":{}},
-    "dim_product": {"grain": ("product_key",), "natural_key": ("product_id",), "sources": ("products",), "type": "type_1", "timezone":"UTC", "required":("product_key","product_id"), "foreign_keys":{}},
+    "dim_date": {"grain": ("date_key",), "merge_key": ("date_key",), "natural_key": ("calendar_date",), "sources": (), "type": "generated", "timezone":"UTC", "required":("date_key","calendar_date")},
+    "dim_customer": {"grain": ("customer_key",), "merge_key": ("customer_key",), "natural_key": ("customer_id",), "sources": ("customers",), "type": "type_1", "timezone":"UTC", "required":("customer_key","customer_id"), "foreign_keys":{}},
+    "dim_product": {"grain": ("product_key",), "merge_key": ("product_key",), "natural_key": ("product_id",), "sources": ("products",), "type": "type_1", "timezone":"UTC", "required":("product_key","product_id"), "foreign_keys":{}},
 }
 
 FACTS = {
     "fact_orders": {
-        "grain": ("order_id",), "primary_key": ("order_id",),
+        "grain": ("order_id",), "primary_key": ("order_id",), "merge_key": ("order_id",),
         "sources": ("orders", "order_items", "customers"),
         "dimensions": ("dim_date", "dim_customer"),
         "measures": ("line_count", "item_count", "gross_amount", "discount_amount", "net_amount"),
         "timezone":"UTC", "required":("order_id","order_date_key","customer_key","customer_natural_key","order_status","line_count","item_count","gross_amount","discount_amount","net_amount"), "foreign_keys":{"customer_key":"dim_customer", "order_date_key":"dim_date"}, "unknown_key": UNKNOWN_KEY,
         "measure_rules": {"line_count": "non_negative", "item_count": "non_negative", "gross_amount": "non_negative", "discount_amount": "non_negative", "net_amount": "gross_amount - discount_amount"},
+        "measures_metadata": {name: {"additivity": "additive", "lifecycle": "non_negative_base_or_derived"} for name in ("line_count", "item_count", "gross_amount", "discount_amount", "net_amount")},
+        "lifecycle": {"status_column": "order_status", "signed_revenue_measure": None, "policy": "preserve_base_amounts; order-level signed_revenue ownership unresolved"},
     },
-    "fact_order_items": {"grain": ("order_item_id",), "primary_key": ("order_item_id",), "sources": ("order_items", "products"), "dimensions": ("dim_product",), "measures": ("quantity", "gross_amount", "discount_amount", "net_amount"), "timezone": "UTC", "required": ("order_item_id", "order_id", "product_key", "quantity", "unit_price", "gross_amount", "discount_amount", "net_amount"), "foreign_keys": {"product_key": "dim_product"}, "unknown_key": UNKNOWN_KEY},
-    "fact_payments": {"grain": ("payment_id",), "primary_key": ("payment_id",), "sources": ("payments",), "dimensions": (), "measures": ("payment_amount", "signed_revenue"), "timezone": "UTC", "required": ("payment_id", "order_id", "payment_status", "payment_method", "payment_amount", "signed_revenue"), "foreign_keys": {}, "unknown_key": UNKNOWN_KEY},
-    "fact_shipments": {"grain": ("shipment_id",), "primary_key": ("shipment_id",), "sources": ("shipments",), "dimensions": (), "measures": (), "timezone": "UTC", "required": ("shipment_id", "order_id", "shipment_status", "shipped_at", "delivered_at"), "foreign_keys": {}, "unknown_key": UNKNOWN_KEY},
+    "fact_order_items": {"grain": ("order_item_id",), "primary_key": ("order_item_id",), "merge_key": ("order_item_id",), "sources": ("order_items", "products"), "dimensions": ("dim_product",), "measures": ("quantity", "gross_amount", "discount_amount", "net_amount"), "timezone": "UTC", "required": ("order_item_id", "order_id", "product_key", "quantity", "unit_price", "gross_amount", "discount_amount", "net_amount"), "foreign_keys": {"product_key": "dim_product"}, "unknown_key": UNKNOWN_KEY, "measures_metadata": {name: {"additivity": "additive", "lifecycle": "non_negative"} for name in ("quantity", "gross_amount", "discount_amount", "net_amount")}},
+    "fact_payments": {"grain": ("payment_id",), "primary_key": ("payment_id",), "merge_key": ("payment_id",), "sources": ("payments",), "dimensions": (), "measures": ("payment_amount", "signed_revenue"), "timezone": "UTC", "required": ("payment_id", "order_id", "payment_status", "payment_method", "payment_amount", "signed_revenue"), "foreign_keys": {"order_id": "fact_orders"}, "unknown_key": UNKNOWN_KEY, "measures_metadata": {"payment_amount": {"additivity": "additive", "lifecycle": "non_negative_base"}, "signed_revenue": {"additivity": "additive", "lifecycle": "REFUNDED_negative_other_statuses_positive"}}, "lifecycle": {"status_column": "payment_status", "signed_revenue_measure": "signed_revenue"}},
+    "fact_shipments": {"grain": ("shipment_id",), "primary_key": ("shipment_id",), "merge_key": ("shipment_id",), "sources": ("shipments",), "dimensions": (), "measures": (), "timezone": "UTC", "required": ("shipment_id", "order_id", "shipment_status", "shipped_at", "delivered_at"), "foreign_keys": {"order_id": "fact_orders"}, "unknown_key": UNKNOWN_KEY, "lifecycle": {"status_column": "shipment_status", "policy": "status_preserved; shipment fees remain shipment-grain"}},
 }
 
 DIMENSIONAL_TABLES = {**DIMENSIONS, **FACTS}
@@ -76,7 +83,7 @@ TABLE_MERGE_KEYS = {
     "dim_product": ("product_key",), "fact_orders": ("order_id",), "fact_order_items": ("order_item_id",), "fact_payments": ("payment_id",), "fact_shipments": ("shipment_id",),
 }
 
-WRITE_ORDER = ("dim_date", "dim_customer", "dim_product", "fact_orders", "fact_order_items", "fact_payments", "fact_shipments")
+WRITE_ORDER = GOLD_TABLES
 
 def get_dimensional_contract(name):
     if name in DIMENSIONAL_TABLES: return DIMENSIONAL_TABLES[name]

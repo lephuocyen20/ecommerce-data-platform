@@ -55,6 +55,8 @@ APPROVED_RUN_IDS = {
     "run-20261111-gold-02",
     "run-20261111-gold-03",
     "run-20261111-gold-04",
+    "run-20261112-gold-05",
+    "run-20261112-gold-06",
 }
 TABLES = tuple(DIMENSIONAL_SOURCE_TABLES)
 

@@ -47,3 +47,27 @@ def test_fact_orders_reconciliation_rejects_invalid_measure_and_date():
 
     with pytest.raises(ValueError, match="YYYYMMDD"):
         reconcile_fact_orders([dict(row, order_date_key=20260230)], [row])
+
+
+def test_fact_orders_reconciliation_rejects_missing_and_extra_columns():
+    row = {
+        "order_id": 1, "customer_id": 7, "order_date_key": 20260101,
+        "order_status": "delivered", "line_count": 1, "item_count": 2,
+        "gross_amount": "12.00", "discount_amount": "1.00", "net_amount": "11.00",
+    }
+    with pytest.raises(ValueError, match="schema"):
+        reconcile_fact_orders([dict(row)], [{key: value for key, value in row.items() if key != "net_amount"}])
+    with pytest.raises(ValueError, match="schema"):
+        reconcile_fact_orders([dict(row, unexpected="drift")], [row])
+
+
+def test_fact_orders_reconciliation_rejects_conflicting_customer_identifiers():
+    row = {
+        "order_id": 1, "customer_id": 7, "order_date_key": 20260101,
+        "order_status": "delivered", "line_count": 1, "item_count": 2,
+        "gross_amount": "12.00", "discount_amount": "1.00", "net_amount": "11.00",
+        "customer_natural_key": 8,
+    }
+    legacy = {key: value for key, value in row.items() if key != "customer_natural_key"}
+    with pytest.raises(ValueError, match="customer_id and customer_natural_key conflict"):
+        reconcile_fact_orders([legacy], [row])

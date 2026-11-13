@@ -12,6 +12,17 @@ from gold.implementation.dimensional.lineage import (
     build_parquet_lineage_artifact,
 )
 from lakehouse.models.spec import SPECS
+from tests.run_bounded_gold_parquet_fixture import APPROVED_RUN_IDS
+
+
+def test_fresh_recovery_run_is_allowlisted_without_changing_run04():
+    assert "run-20261112-gold-05" in APPROVED_RUN_IDS
+    assert "run-20261111-gold-04" in APPROVED_RUN_IDS
+
+
+def test_second_fresh_recovery_run_is_allowlisted_without_changing_run05():
+    assert "run-20261112-gold-06" in APPROVED_RUN_IDS
+    assert "run-20261112-gold-05" in APPROVED_RUN_IDS
 
 
 def _manifest(table, batch, prefix):
