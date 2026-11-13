@@ -204,6 +204,28 @@ class NessieRestAdapter:
             ref_type="TAG",
         )
 
+    def update_branch(self, ref: str, target_hash: str, expected_current_hash: str) -> NessieReference:
+        """Advance a stable branch with Nessie's compare-and-swap guard."""
+        ref = _require_string(ref, "ref")
+        target_hash = _require_hash(target_hash, "target_hash")
+        expected_current_hash = _require_hash(expected_current_hash, "expected_current_hash")
+        payload = self._request(
+            "PUT",
+            f"/trees/{quote(ref, safe='')}?expectedHash={quote(expected_current_hash, safe='')}",
+            {"type": "BRANCH", "name": ref, "hash": target_hash},
+        )
+        return self._parse_reference(payload, ref, "BRANCH")
+
+    @staticmethod
+    def _parse_reference(payload: Mapping[str, Any], ref: str, expected_type: str) -> NessieReference:
+        response = payload.get("reference") if isinstance(payload.get("reference"), dict) else payload
+        if not isinstance(response, dict):
+            raise PromotionError("Nessie response is missing required reference object")
+        response_name = _require_string(response.get("name"), "Nessie reference name")
+        if response_name != ref or response.get("type") != expected_type:
+            raise PromotionError("Nessie response reference identity does not match request")
+        return NessieReference(response_name, _require_hash(response.get("hash"), "Nessie reference hash"), expected_type)
+
 
 def promote_candidate(
     manifest: CandidateManifest,
@@ -274,6 +296,47 @@ def promote_candidate(
         "current_hash": None if current is None else current.hash,
         "current_state": "ABSENT" if target_absent else ("VERIFIED_TAG" if current is not None else "UNVERIFIED"),
         "planned_operation": "CREATE_TAG" if target_absent else "NOOP",
+        "schema": manifest.schema,
+        "tables": list(manifest.tables),
+    }
+
+
+def advance_stable_branch(
+    manifest: CandidateManifest,
+    *,
+    adapter: Optional[NessieRestAdapter] = None,
+    target_ref: str = TARGET_REF,
+    expected_current_hash: Optional[str] = None,
+    apply: bool = False,
+) -> dict[str, Any]:
+    """Plan or CAS-advance the stable BI branch after verified evidence."""
+    if target_ref != TARGET_REF:
+        raise PromotionError("target_ref must be exactly bi_gold_current")
+    if apply and (adapter is None or not expected_current_hash):
+        raise PromotionError("branch apply requires adapter and expected_current_hash")
+    if expected_current_hash is not None:
+        expected_current_hash = _require_hash(expected_current_hash, "expected_current_hash")
+    current = None
+    try:
+        if adapter is not None:
+            current = adapter.get_ref(target_ref)
+    except NessieReferenceNotFound:
+        raise PromotionError("stable branch must exist before CAS publication") from None
+    if current is None or current.ref_type != "BRANCH":
+        raise PromotionError("stable target must be an existing BRANCH")
+    if expected_current_hash is not None and current.hash != expected_current_hash:
+        raise PromotionError("current target hash does not match expected_current_hash")
+    if apply:
+        updated = adapter.update_branch(target_ref, manifest.candidate_hash, current.hash)  # type: ignore[union-attr]
+        if updated.hash != manifest.candidate_hash:
+            raise PromotionError("Nessie branch update did not verify the candidate hash")
+        return {"mode": "APPLY_UPDATE_BRANCH", "target_ref": target_ref, "assigned_hash": updated.hash, "schema": manifest.schema}
+    return {
+        "mode": "DRY_RUN_UPDATE_BRANCH",
+        "target_ref": target_ref,
+        "candidate_ref": manifest.candidate_ref,
+        "candidate_hash": manifest.candidate_hash,
+        "current_hash": current.hash,
         "schema": manifest.schema,
         "tables": list(manifest.tables),
     }

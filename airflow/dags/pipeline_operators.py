@@ -142,11 +142,13 @@ def create_gold_dimensional_operator(*, project_path, mode="DRY_RUN"):
         })
     if scope is not None:
         arguments.extend(["--warehouse", scope.warehouse, "--nessie-ref", scope.nessie_ref])
+        target_namespace = os.environ.get("GOLD_TARGET_NAMESPACE", "gold_run_20261112_gold_06")
         extra_environment.update({
             "LAKEHOUSE_E2E_APPROVED": "1",
             "LAKEHOUSE_E2E_TEST_BUCKET": scope.bucket,
             "LAKEHOUSE_E2E_RUN_ID": scope.run_id,
             "LAKEHOUSE_E2E_PREFIX": scope.prefix,
+            "GOLD_TARGET_NAMESPACE": target_namespace,
         })
     return create_spark_submit_operator(
         task_id="gold_dimensional_write",

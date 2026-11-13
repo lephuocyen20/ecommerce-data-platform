@@ -18,6 +18,7 @@ class BoundedE2EScope:
     bucket: str
     run_id: str
     prefix: str
+    target_namespace: str | None = None
 
     @property
     def warehouse(self):
@@ -29,7 +30,7 @@ class BoundedE2EScope:
 
     @property
     def gold_namespace(self):
-        return "gold_" + re.sub(r"[^A-Za-z0-9_]", "_", self.run_id)
+        return self.target_namespace or ("gold_" + re.sub(r"[^A-Za-z0-9_]", "_", self.run_id))
 
     @property
     def silver_namespace(self):

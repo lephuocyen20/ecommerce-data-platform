@@ -31,6 +31,53 @@ from gold_gate_policy import decide_gold_dimensional_gate
 from gold.implementation.dimensional.lineage import build_parquet_lineage_artifact
 
 
+@task(task_id="publish_gold_to_active", retries=0)
+def publish_gold_to_active_task(writer_result):
+    """CAS-publish only a verified WRITE result to the stable BI branch."""
+    if isinstance(writer_result, str):
+        from gold.implementation.dimensional.verification import parse_writer_result
+        writer_result = parse_writer_result(writer_result)
+    if not isinstance(writer_result, dict):
+        raise RuntimeError("Gold publish requires the structured writer result")
+    if writer_result.get("mode") != "WRITE":
+        return {"status": "SKIPPED", "reason": "Gold writer was not WRITE"}
+    if os.environ.get("BRONZE_BUCKET") != TEST_BUCKET:
+        return {"status": "SKIPPED", "reason": "Active publication requires the approved shared Gold bucket"}
+    report = writer_result.get("certification_report")
+    if not isinstance(report, dict) or report.get("certified") is not True or report.get("can_write") is not True:
+        raise RuntimeError("Gold publish requires certified WRITE evidence")
+    if os.environ.get("BI_ACTIVE_PUBLISH_APPLY") != "1":
+        raise RuntimeError("BI_ACTIVE_PUBLISH_APPLY=1 is required for active Gold publication")
+    expected_hash = os.environ.get("BI_GOLD_CURRENT_EXPECTED_HASH")
+    if not expected_hash:
+        raise RuntimeError("BI_GOLD_CURRENT_EXPECTED_HASH is required for active Gold publication")
+    from gold.implementation.bi_ref_promotion import (
+        CandidateManifest,
+        NessieRestAdapter,
+        advance_stable_branch,
+    )
+    candidate_ref = report.get("ref")
+    schema = os.environ.get("GOLD_TARGET_NAMESPACE", "gold_run_20261112_gold_06")
+    if not isinstance(candidate_ref, str) or not schema:
+        raise RuntimeError("Gold publish requires candidate ref and GOLD_TARGET_NAMESPACE")
+    adapter = NessieRestAdapter(os.environ["NESSIE_URI"])
+    candidate_hash = adapter.get_ref(candidate_ref).hash
+    outputs = report.get("outputs")
+    if not isinstance(outputs, list) or len(outputs) != 7:
+        raise RuntimeError("Gold publish requires all seven certified outputs")
+    tables = tuple(sorted(item["table"] for item in outputs if isinstance(item, dict) and isinstance(item.get("table"), str)))
+    from gold.implementation.gold_table_registry import RUN06_TABLES
+    if tables != tuple(sorted(RUN06_TABLES)):
+        raise RuntimeError("Gold publish requires the exact certified seven-table set")
+    manifest = CandidateManifest(candidate_ref, candidate_hash, schema, tables, "VERIFIED")
+    return advance_stable_branch(
+        manifest,
+        adapter=adapter,
+        expected_current_hash=expected_hash,
+        apply=True,
+    )
+
+
 @task(retries=0)
 def gold_dimensional_gate(silver_results: dict, dimensional_artifacts: dict, config: dict):
     """Validate Silver inputs and skip the Gold branch when it is disabled."""

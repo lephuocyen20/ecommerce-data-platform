@@ -12,7 +12,7 @@ if PROJECT_ROOT not in sys.path:
 
 from pipeline_contracts import TABLES
 from pipeline_operators import (create_gold_dimensional_confirmation_operator, create_gold_dimensional_operator, create_incremental_silver_operator)
-from pipeline_tasks.gold import build_dimensional_parquet_artifact_task
+from pipeline_tasks.gold import build_dimensional_parquet_artifact_task, publish_gold_to_active_task
 from pipeline_tasks.ingestion import ingest_incremental, validate_config, validate_incremental
 from pipeline_tasks.silver import check_silver_eligibility, silver_result, skip_silver, verify_silver_manifest
 
@@ -63,6 +63,7 @@ def ecommerce_incremental_ingestion():
         mode=os.environ.get("GOLD_DIMENSIONAL_MODE", "DRY_RUN"),
     )
     list(dimensional_artifacts.values()) >> dimensional_writer
+    active_gold_publish = publish_gold_to_active_task(dimensional_writer)
 
     with TaskGroup(group_id="gold_dimensions", prefix_group_id=False):
         dimension_confirmations = [
@@ -76,7 +77,7 @@ def ecommerce_incremental_ingestion():
         ]
     confirmations = dimension_confirmations + fact_confirmations
     for confirmation in confirmations:
-        dimensional_writer >> confirmation
+        active_gold_publish >> confirmation
 
 
 ecommerce_incremental_ingestion()

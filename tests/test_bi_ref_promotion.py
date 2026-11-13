@@ -54,6 +54,10 @@ class FakeAdapter:
         self.create_calls.append((ref, target_hash))
         return NessieReference(ref, target_hash, "TAG")
 
+    def update_branch(self, ref, target_hash, expected_current_hash):
+        self.assign_calls.append((ref, target_hash, expected_current_hash))
+        return NessieReference(ref, target_hash, "BRANCH")
+
 
 class MissingTargetAdapter(FakeAdapter):
     def get_ref(self, ref):
@@ -123,6 +127,36 @@ def test_missing_target_dry_run_and_guarded_tag_creation():
     result = promote_candidate(candidate, adapter=adapter, expected_current_hash="ABSENT", apply=True)
     assert result["mode"] == "APPLY_CREATE_TAG"
     assert adapter.create_calls == [("bi_gold_current", HASH)]
+
+
+def test_stable_branch_publish_requires_cas_and_updates_only_verified_candidate():
+    from gold.implementation.bi_ref_promotion import advance_stable_branch
+
+    candidate = load_candidate_manifest_from_value(manifest())
+    adapter = FakeAdapter(ref_type="BRANCH")
+    result = advance_stable_branch(candidate, adapter=adapter, expected_current_hash=CURRENT_HASH)
+    assert result["mode"] == "DRY_RUN_UPDATE_BRANCH"
+    assert adapter.assign_calls == []
+
+    applied = advance_stable_branch(
+        candidate,
+        adapter=adapter,
+        expected_current_hash=CURRENT_HASH,
+        apply=True,
+    )
+    assert applied["mode"] == "APPLY_UPDATE_BRANCH"
+    assert applied["assigned_hash"] == HASH
+    assert adapter.assign_calls == [("bi_gold_current", HASH, CURRENT_HASH)]
+
+
+def test_stable_branch_publish_rejects_tag_and_compare_and_swap_mismatch():
+    from gold.implementation.bi_ref_promotion import advance_stable_branch
+
+    candidate = load_candidate_manifest_from_value(manifest())
+    with pytest.raises(PromotionError, match="existing BRANCH"):
+        advance_stable_branch(candidate, adapter=FakeAdapter(ref_type="TAG"), expected_current_hash=CURRENT_HASH)
+    with pytest.raises(PromotionError, match="does not match"):
+        advance_stable_branch(candidate, adapter=FakeAdapter(ref_type="BRANCH"), expected_current_hash="c" * 64)
 
 
 def test_existing_tag_must_match_candidate_hash():

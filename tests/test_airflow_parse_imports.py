@@ -40,7 +40,8 @@ def test_native_dimensional_group_has_one_writer_and_non_writing_confirmations()
     assert 'task_display_name=f"gold_dimensional_write_{table_name}"' in operators
     assert "| tojson" in operators
     assert "for confirmation in confirmations:" in dag_source
-    assert "dimensional_writer >> confirmation" in dag_source
+    assert "active_gold_publish >> confirmation" in dag_source
+    assert "publish_gold_to_active_task" in dag_source
     assert "dimensional_verify >> confirmation" not in dag_source
     assert "dimensional_gate" not in dag_source
     gold_tasks = (ROOT / "airflow/dags/pipeline_tasks/gold.py").read_text(encoding="utf-8")

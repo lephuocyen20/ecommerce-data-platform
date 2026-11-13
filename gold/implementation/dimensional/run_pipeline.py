@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -83,6 +84,11 @@ def main(argv=None):
             scope = build_bounded_e2e_scope(os.environ)
         except BoundedE2EScopeError as exc:
             raise SystemExit(f"Refusing shared-bucket run: {exc}") from exc
+        target_namespace = os.environ.get("GOLD_TARGET_NAMESPACE")
+        if target_namespace:
+            if not target_namespace.replace("_", "").isalnum() or len(target_namespace) > 63:
+                raise SystemExit("GOLD_TARGET_NAMESPACE must be an alphanumeric underscore namespace")
+            scope = replace(scope, target_namespace=target_namespace)
         if args.warehouse and args.warehouse != scope.warehouse:
             raise SystemExit("--warehouse must match the immutable E2E scope")
         if args.nessie_ref and args.nessie_ref != scope.nessie_ref:
