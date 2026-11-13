@@ -1,0 +1,36 @@
+name: trino-bi-local-${TRINO_RUN_ID:-dev}
+
+x-trino-local-contract:
+  image: trinodb/trino:476
+  catalog: lakehouse
+  schema: gold_run_20261112_gold_06
+  nessie_ref: bi_gold_current
+  access_mode: read-only
+
+services:
+  trino:
+    image: trinodb/trino:476
+    ports:
+      - "127.0.0.1:${TRINO_PORT:-8081}:8080"
+    environment:
+      TRINO_NESSIE_URI: ${TRINO_NESSIE_URI:?TRINO_NESSIE_URI is required}
+      TRINO_S3_ACCESS_KEY: ${TRINO_S3_READONLY_ACCESS_KEY:?TRINO_S3_READONLY_ACCESS_KEY is required}
+      TRINO_S3_SECRET_KEY: ${TRINO_S3_READONLY_SECRET_KEY:?TRINO_S3_READONLY_SECRET_KEY is required}
+    volumes:
+      - ./trino/etc:/etc/trino:ro
+    networks:
+      - quality-it-local
+      - metabase-local
+      - root-local
+    restart: "no"
+
+networks:
+  quality-it-local:
+    name: quality-it-local-${QUALITY_IT_RUN_ID:-dev}
+    external: true
+  metabase-local:
+    name: ecommerce-metabase-local-${METABASE_RUN_ID:-dev}
+    external: true
+  root-local:
+    name: ecommerce-data-platform_default
+    external: true

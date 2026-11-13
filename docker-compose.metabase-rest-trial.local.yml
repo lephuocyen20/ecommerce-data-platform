@@ -1,0 +1,58 @@
+name: metabase-rest-trial-local-${METABASE_TRIAL_RUN_ID:-dev}
+
+x-metabase-rest-trial-contract:
+  phase: "bounded-bi-consumer-trial"
+  active_cutover: false
+  metabase_image: "metabase/metabase:v0.55.3"
+  database_image: "postgres:16.4"
+  trino_endpoint: "trino-rest-postgres-validation:8080"
+  trino_catalog: "lakehouse_rest_postgres"
+  trino_schema: "gold_run_20261112_gold_06"
+  read_only: true
+  production: false
+
+services:
+  metabase-rest-trial-db:
+    image: postgres:16.4
+    profiles: [metabase-rest-trial]
+    environment:
+      POSTGRES_DB: metabase_trial
+      POSTGRES_USER: metabase_trial
+      POSTGRES_PASSWORD: ${METABASE_TRIAL_DB_PASSWORD:?METABASE_TRIAL_DB_PASSWORD is required}
+    volumes:
+      - metabase_rest_trial_metadata:/var/lib/postgresql/data
+    networks: [metabase-rest-trial]
+    restart: "no"
+
+  metabase-rest-trial:
+    image: metabase/metabase:v0.55.3
+    profiles: [metabase-rest-trial]
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: metabase_trial
+      MB_DB_PORT: "5432"
+      MB_DB_USER: metabase_trial
+      MB_DB_PASS: ${METABASE_TRIAL_DB_PASSWORD:?METABASE_TRIAL_DB_PASSWORD is required}
+      MB_DB_HOST: metabase-rest-trial-db
+      MB_JETTY_PORT: "3000"
+    ports:
+      - "127.0.0.1:${METABASE_TRIAL_PORT:-3001}:3000"
+    networks:
+      - metabase-rest-trial
+      - rest-postgres-validation
+    depends_on:
+      metabase-rest-trial-db:
+        condition: service_started
+    restart: "no"
+
+volumes:
+  metabase_rest_trial_metadata:
+    name: ecommerce-metabase-rest-trial-${METABASE_TRIAL_RUN_ID:-dev}
+
+networks:
+  metabase-rest-trial:
+    name: ecommerce-metabase-rest-trial-${METABASE_TRIAL_RUN_ID:-dev}
+    internal: true
+  rest-postgres-validation:
+    external: true
+    name: ecommerce-iceberg-rest-postgres-${METABASE_TRIAL_RUN_ID:-dev}

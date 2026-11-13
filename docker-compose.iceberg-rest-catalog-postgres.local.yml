@@ -1,0 +1,91 @@
+name: iceberg-rest-catalog-postgres-local-${ICEBERG_REST_RUN_ID:-dev}
+
+x-iceberg-rest-postgres-contract:
+  phase: "persistent-candidate-static-only"
+  active: false
+  runtime_status: "PERSISTENT_JDBC_RUNTIME_PASS"
+  rest_image: "local/iceberg-rest-fixture-postgres:1.10.0-jdbc42.7.4"
+  backend: "isolated-postgresql-jdbc-catalog"
+  replaces_nessie: false
+  object_data_mutation: false
+  cutover: false
+  jdbc_driver_classpath: "CUSTOM_IMAGE_EXPLICIT_CP_VERIFIED_RUNTIME"
+
+services:
+  rest-catalog-postgres-db:
+    image: postgres:16.4
+    profiles: [iceberg-rest-catalog-postgres]
+    environment:
+      POSTGRES_DB: iceberg_rest_catalog
+      POSTGRES_USER: iceberg_rest_catalog
+      POSTGRES_PASSWORD: ${ICEBERG_REST_DB_PASSWORD:?ICEBERG_REST_DB_PASSWORD is required}
+    volumes:
+      - iceberg_rest_postgres_metadata:/var/lib/postgresql/data
+    networks: [iceberg-rest-postgres]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iceberg_rest_catalog -d iceberg_rest_catalog"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: "no"
+
+  rest-catalog-postgres:
+    build:
+      context: .
+      dockerfile: iceberg-rest-catalog/postgres/Dockerfile
+    image: local/iceberg-rest-fixture-postgres:1.10.0-jdbc42.7.4
+    profiles: [iceberg-rest-catalog-postgres]
+    environment:
+      REST_PORT: "8181"
+      CATALOG_CATALOG__IMPL: org.apache.iceberg.jdbc.JdbcCatalog
+      CATALOG_URI: jdbc:postgresql://rest-catalog-postgres-db:5432/iceberg_rest_catalog
+      CATALOG_JDBC_USER: iceberg_rest_catalog
+      CATALOG_JDBC_PASSWORD: ${ICEBERG_REST_DB_PASSWORD:?ICEBERG_REST_DB_PASSWORD is required}
+      CATALOG_WAREHOUSE: s3://ecommerce-data-lake
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${QUALITY_IT_MINIO_ACCESS_KEY:?QUALITY_IT_MINIO_ACCESS_KEY is required}
+      AWS_SECRET_ACCESS_KEY: ${QUALITY_IT_MINIO_SECRET_KEY:?QUALITY_IT_MINIO_SECRET_KEY is required}
+    expose: ["8181"]
+    ports:
+      - "127.0.0.1:${ICEBERG_POSTGRES_REST_PORT:-8182}:8181"
+    networks:
+      - iceberg-rest-postgres
+      - minio-local
+    depends_on:
+      rest-catalog-postgres-db:
+        condition: service_healthy
+    restart: "no"
+
+  trino-rest-postgres-validation:
+    image: trinodb/trino:476
+    profiles: [iceberg-rest-postgres-validation]
+    environment:
+      ICEBERG_POSTGRES_REST_CATALOG_URI: http://rest-catalog-postgres:8181
+      TRINO_S3_READONLY_ACCESS_KEY: ${TRINO_S3_READONLY_ACCESS_KEY:?TRINO_S3_READONLY_ACCESS_KEY is required}
+      TRINO_S3_READONLY_SECRET_KEY: ${TRINO_S3_READONLY_SECRET_KEY:?TRINO_S3_READONLY_SECRET_KEY is required}
+    volumes:
+      - ./trino/rest-catalog-postgres-validation/etc:/etc/trino:ro
+    ports:
+      - "127.0.0.1:${ICEBERG_POSTGRES_TRINO_PORT:-18085}:8080"
+    networks:
+      - iceberg-rest-postgres
+      - root-local
+    restart: "no"
+
+volumes:
+  iceberg_rest_postgres_metadata:
+    name: ecommerce-iceberg-rest-postgres-${ICEBERG_REST_RUN_ID:-dev}
+
+networks:
+  iceberg-rest-postgres:
+    name: ecommerce-iceberg-rest-postgres-${ICEBERG_REST_RUN_ID:-dev}
+    internal: true
+  minio-local:
+    external: true
+    name: ecommerce-data-platform_default
+  root-local:
+    name: ecommerce-data-platform_default
+    external: true
