@@ -57,6 +57,46 @@ class NessieReference:
     ref_type: str = "BRANCH"
 
 
+def candidate_from_certification(
+    report: Mapping[str, Any],
+    *,
+    candidate_ref: str,
+    schema: str,
+    bucket: str,
+    prefix: str,
+    run_id: str,
+) -> CandidateManifest:
+    """Convert verified writer evidence into a bounded publication manifest."""
+    if not isinstance(report, Mapping):
+        raise PromotionError("publication evidence must be an object")
+    if report.get("certified") is not True or report.get("can_write") is not True:
+        raise PromotionError("publication requires certified writable evidence")
+    if report.get("mode") != "WRITE" or report.get("verification_status") != "VERIFIED":
+        raise PromotionError("publication requires verified WRITE evidence")
+    if report.get("bucket") != bucket or report.get("prefix") != prefix or report.get("run_id") != run_id:
+        raise PromotionError("publication evidence scope does not match the approved run")
+    if report.get("ref") != candidate_ref:
+        raise PromotionError("publication evidence ref does not match the candidate ref")
+    outputs = report.get("outputs")
+    if not isinstance(outputs, list) or len(outputs) != len(EXPECTED_TABLES):
+        raise PromotionError("publication evidence must contain exactly seven outputs")
+    tables = []
+    for item in outputs:
+        if not isinstance(item, Mapping) or not isinstance(item.get("table"), str):
+            raise PromotionError("publication outputs must contain table names")
+        if item["table"] in tables or item["table"] not in EXPECTED_TABLES:
+            raise PromotionError("publication output table set is not allowlisted")
+        if not isinstance(item.get("snapshot_id"), int) or item["snapshot_id"] <= 0:
+            raise PromotionError("publication output snapshot IDs must be positive")
+        if item.get("readback_status") != "PASS":
+            raise PromotionError("publication output readback must PASS")
+        tables.append(item["table"])
+    if tuple(sorted(tables)) != tuple(sorted(EXPECTED_TABLES)):
+        raise PromotionError("publication output table set is incomplete")
+    candidate_hash = _require_hash(report.get("candidate_hash"), "candidate_hash")
+    return CandidateManifest(candidate_ref, candidate_hash, schema, tuple(sorted(tables)), "VERIFIED")
+
+
 def _require_string(value: Any, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise PromotionError(f"{label} must be a non-empty string")

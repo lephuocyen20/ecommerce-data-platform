@@ -15,6 +15,7 @@ from gold.implementation.bi_ref_promotion import (
     main,
     promote_candidate,
     validate_candidate_manifest,
+    candidate_from_certification,
 )
 
 
@@ -157,6 +158,42 @@ def test_stable_branch_publish_rejects_tag_and_compare_and_swap_mismatch():
         advance_stable_branch(candidate, adapter=FakeAdapter(ref_type="TAG"), expected_current_hash=CURRENT_HASH)
     with pytest.raises(PromotionError, match="does not match"):
         advance_stable_branch(candidate, adapter=FakeAdapter(ref_type="BRANCH"), expected_current_hash="c" * 64)
+
+
+def test_candidate_from_certification_requires_exact_scope_and_readback():
+    report = {
+        "certified": True,
+        "can_write": True,
+        "mode": "WRITE",
+        "verification_status": "VERIFIED",
+        "bucket": "ecommerce-data-lake",
+        "prefix": "quality-it/run-test/",
+        "run_id": "run-test",
+        "ref": "quality_it_run_test",
+        "candidate_hash": HASH,
+        "outputs": [
+            {"table": table, "snapshot_id": index + 1, "readback_status": "PASS"}
+            for index, table in enumerate(EXPECTED_TABLES)
+        ],
+    }
+    candidate = candidate_from_certification(
+        report,
+        candidate_ref="quality_it_run_test",
+        schema=EXPECTED_SCHEMA,
+        bucket="ecommerce-data-lake",
+        prefix="quality-it/run-test/",
+        run_id="run-test",
+    )
+    assert candidate.candidate_hash == HASH
+    with pytest.raises(PromotionError, match="scope"):
+        candidate_from_certification(
+            {**report, "prefix": "quality-it/other/"},
+            candidate_ref="quality_it_run_test",
+            schema=EXPECTED_SCHEMA,
+            bucket="ecommerce-data-lake",
+            prefix="quality-it/run-test/",
+            run_id="run-test",
+        )
 
 
 def test_existing_tag_must_match_candidate_hash():

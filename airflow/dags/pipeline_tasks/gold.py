@@ -52,24 +52,26 @@ def publish_gold_to_active_task(writer_result):
     if not expected_hash:
         raise RuntimeError("BI_GOLD_CURRENT_EXPECTED_HASH is required for active Gold publication")
     from gold.implementation.bi_ref_promotion import (
-        CandidateManifest,
         NessieRestAdapter,
         advance_stable_branch,
+        candidate_from_certification,
     )
     candidate_ref = report.get("ref")
     schema = os.environ.get("GOLD_TARGET_NAMESPACE", "gold_run_20261112_gold_06")
-    if not isinstance(candidate_ref, str) or not schema:
+    scope = build_bounded_e2e_scope(os.environ)
+    if not isinstance(candidate_ref, str) or candidate_ref != scope.nessie_ref or not schema:
         raise RuntimeError("Gold publish requires candidate ref and GOLD_TARGET_NAMESPACE")
     adapter = NessieRestAdapter(os.environ["NESSIE_URI"])
     candidate_hash = adapter.get_ref(candidate_ref).hash
-    outputs = report.get("outputs")
-    if not isinstance(outputs, list) or len(outputs) != 7:
-        raise RuntimeError("Gold publish requires all seven certified outputs")
-    tables = tuple(sorted(item["table"] for item in outputs if isinstance(item, dict) and isinstance(item.get("table"), str)))
-    from gold.implementation.gold_table_registry import RUN06_TABLES
-    if tables != tuple(sorted(RUN06_TABLES)):
-        raise RuntimeError("Gold publish requires the exact certified seven-table set")
-    manifest = CandidateManifest(candidate_ref, candidate_hash, schema, tables, "VERIFIED")
+    publish_report = {**report, "candidate_hash": candidate_hash}
+    manifest = candidate_from_certification(
+        publish_report,
+        candidate_ref=candidate_ref,
+        schema=schema,
+        bucket=scope.bucket,
+        prefix=scope.prefix,
+        run_id=scope.run_id,
+    )
     return advance_stable_branch(
         manifest,
         adapter=adapter,

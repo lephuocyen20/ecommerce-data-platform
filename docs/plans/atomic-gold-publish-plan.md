@@ -58,7 +58,10 @@ Metabase.
 - Shared-bucket candidates use the stable active namespace
   `gold_run_20261112_gold_06` while retaining run-scoped warehouse/ref
   isolation; quality-it runs never publish to the active branch.
-- Focused implementation suite: **51 passed**; `compileall` and
+- Candidate publication evidence validates the exact bounded bucket, prefix,
+  run ID, candidate ref, seven-table set, positive snapshot IDs and read-back
+  `PASS` status before any branch update is attempted.
+- Focused implementation suite: **55 passed**; `compileall` and
   `git diff --check`: **PASS**.
 - No runtime write, Nessie branch update, MinIO mutation, database mutation or
   Metabase cutover was executed.
