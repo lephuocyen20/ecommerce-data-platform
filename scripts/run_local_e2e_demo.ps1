@@ -72,7 +72,7 @@ if (-not $prefix) { $prefix = "quality-it/$runId/" }
 $nessieUri = $env:NESSIE_URI
 $nessieRef = if ($env:NESSIE_REF) { $env:NESSIE_REF } else { 'main' }
 
-Require ($bucket -eq 'ecommerce-quality-it') 'bucket must be ecommerce-quality-it'
+Require ($bucket -eq 'ecommerce-lakehouse-quality-it') 'bucket must be ecommerce-lakehouse-quality-it'
 Require ($runId -match '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') 'QUALITY_IT_RUN_ID is invalid'
 Require ($prefix -eq "quality-it/$runId/") 'prefix must be quality-it/<run-id>/'
 Require ($nessieUri -match '^(http://)?(127\.0\.0\.1|localhost|nessie|host\.docker\.internal)(:\d+)?/api/v2$') 'NESSIE_URI must be a local Nessie /api/v2 endpoint'

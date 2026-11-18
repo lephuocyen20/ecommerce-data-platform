@@ -227,7 +227,9 @@ def validate_shipments(records, orders, paid_order_ids):
     print("DQ 01-15: PASS")
 
 
-def generate_shipments(cursor, only_missing=False):
+def generate_shipments(cursor, only_missing=False, order_id_min=None, order_ids=None):
+    if order_id_min is not None and order_ids is not None:
+        raise ValueError("Use either order_id_min or order_ids, not both")
     query = """
         SELECT
             o.order_id,
@@ -241,23 +243,29 @@ def generate_shipments(cursor, only_missing=False):
             'DELIVERED'
         )
     """
+    filters = []
     if only_missing:
-        query += """
-        AND NOT EXISTS (
-            SELECT 1
-            FROM shipments s
-            WHERE s.order_id = o.order_id
-        )
-        """
+        filters.append("NOT EXISTS (SELECT 1 FROM shipments s WHERE s.order_id = o.order_id)")
+    if order_ids is not None:
+        if not order_ids:
+            return []
+        filters.append("o.order_id = ANY(%s)")
+    elif order_id_min is not None:
+        filters.append("o.order_id >= %s")
+    if filters:
+        query += " AND " + " AND ".join(filters)
     query += """
         ORDER BY o.order_id
     """
-    cursor.execute(query)
+    if order_ids is not None:
+        cursor.execute(query, (list(order_ids),))
+    else:
+        cursor.execute(query, (order_id_min,) if order_id_min is not None else ())
 
     orders = cursor.fetchall()
 
     if not orders:
-        if only_missing:
+        if only_missing or order_ids is not None:
             print("NO_DATA: No eligible orders require new shipments")
             return []
         raise RuntimeError("No eligible orders for shipments generation")

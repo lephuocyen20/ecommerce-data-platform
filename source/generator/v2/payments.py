@@ -145,28 +145,36 @@ def _validate_records(records, orders):
     print("DQ 01-12: PASS")
 
 
-def generate_payments(cursor, only_missing=False):
+def generate_payments(cursor, only_missing=False, order_id_min=None, order_ids=None):
+    if order_id_min is not None and order_ids is not None:
+        raise ValueError("Use either order_id_min or order_ids, not both")
     query = """
         SELECT o.order_id, o.status, o.order_date, o.updated_at,
                SUM(oi.quantity * oi.unit_price - oi.discount_amount) AS order_amount
         FROM orders o JOIN order_items oi ON o.order_id = oi.order_id
     """
+    filters = []
     if only_missing:
-        query += """
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM payments p
-            WHERE p.order_id = o.order_id
-        )
-        """
+        filters.append("NOT EXISTS (SELECT 1 FROM payments p WHERE p.order_id = o.order_id)")
+    if order_ids is not None:
+        if not order_ids:
+            return []
+        filters.append("o.order_id = ANY(%s)")
+    elif order_id_min is not None:
+        filters.append("o.order_id >= %s")
+    if filters:
+        query += " WHERE " + " AND ".join(filters)
     query += """
         GROUP BY o.order_id, o.status, o.order_date, o.updated_at
         ORDER BY o.order_date
     """
-    cursor.execute(query)
+    if order_ids is not None:
+        cursor.execute(query, (list(order_ids),))
+    else:
+        cursor.execute(query, (order_id_min,) if order_id_min is not None else ())
     orders = cursor.fetchall()
     if not orders:
-        if only_missing:
+        if only_missing or order_ids is not None:
             print("NO_DATA: No orders require new payments")
             return []
         raise RuntimeError("No orders available for payments generation")

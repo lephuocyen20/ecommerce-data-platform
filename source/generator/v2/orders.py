@@ -59,6 +59,7 @@ def generate_orders_with_items(cursor, n, end_date):
             raise RuntimeError("Customer created after reference date")
         planned_orders.append((random_timestamp(order_start_date, end_date), customer_id))
 
+    generated_order_ids = []
     generated_items = 0
     for order_date, customer_id in sorted(planned_orders):
         status = generate_order_status(order_date, end_date)
@@ -69,6 +70,7 @@ def generate_orders_with_items(cursor, n, end_date):
             (customer_id, status, order_date, updated_at),
         )
         order_id = cursor.fetchone()[0]
+        generated_order_ids.append(order_id)
         available_products = [p for p in products if p[3] <= order_date and stock[p[0]] > 0]
         if not available_products:
             raise RuntimeError(f"No available products for order {order_id}")
@@ -91,4 +93,5 @@ def generate_orders_with_items(cursor, n, end_date):
         cursor.execute("UPDATE products SET stock_quantity = %s WHERE product_id = %s", (remaining, product_id))
     print(f"Generated {n} orders")
     print(f"Generated {generated_items} order items")
+    return generated_order_ids
 
