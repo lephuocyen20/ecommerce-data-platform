@@ -153,7 +153,9 @@ $env:QUALITY_IT_RUN_ID="r5-local-a"
 .\.venv\Scripts\python.exe tests\seed_local_postgres_e2e.py
 ```
 
-The seed uses only `INSERT ... ON CONFLICT DO UPDATE` against existing
+The `tests/` directory is a local-only workspace and is not tracked in the
+remote repository. This command is available only when that local workspace
+has been restored. The seed uses only `INSERT ... ON CONFLICT DO UPDATE` against existing
 `customers`, `products`, `orders`, `order_items`, `payments`, and `shipments`
 tables. Its target must remain PostgreSQL host `postgres`, `localhost`, or
 `127.0.0.1` and database `ecommerce_platform`; external hosts and other
@@ -179,4 +181,6 @@ There is no `warehouse_gate`, raw PostgreSQL analytical loader, or `dbt_build` t
 .\.venv\Scripts\python.exe -m pytest -q tests\test_gold_orchestration.py tests\test_lakehouse_safety_guards.py
 ```
 
+The pytest command is also local-only; a fresh clone must supply the local
+`tests/` workspace separately before running it.
 Runtime writes remain subject to approved local-only quality and cutover plans. Never point local guards at production or shared storage.

@@ -33,7 +33,7 @@ are still needed for controlled backfill or reconciliation.
 | Spark | Silver transformations and Gold processing |
 | Nessie | Versioned Iceberg REST catalog |
 | Airflow | Dependency-aware orchestration and runtime evidence |
-| pytest | Unit, integration, and explicitly gated E2E checks |
+| Local pytest workspace | Unit, integration, and explicitly gated E2E checks; kept outside the remote repository |
 
 ## Repository layout
 
@@ -45,14 +45,15 @@ ingestion/          Source-to-Bronze ingestion and replay logic
 lakehouse/          Iceberg diagnostics and legacy compatibility utilities
 silver/             Silver validation and incremental Parquet writers
 source/             Source generators, database schema, and author-only SQL
-tests/              Safe regression and bounded integration tests
 docs/               Roadmap, architecture, runbook, and evidence
 ```
 
 ## Local verification
 
-Read [`docs/RUNBOOK.md`](docs/RUNBOOK.md) before starting services. The safe
-regression suite does not write to shared lakehouse data:
+Read [`docs/RUNBOOK.md`](docs/RUNBOOK.md) before starting services. The
+optional `tests/` directory is local-only and is not present in a fresh Git
+clone. When it exists in the workspace, the safe regression suite does not
+write to shared lakehouse data:
 
 ```powershell
 python -m pytest -q -m "unit or integration" -p no:cacheprovider
