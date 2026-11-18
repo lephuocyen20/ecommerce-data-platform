@@ -19,8 +19,13 @@ except ImportError:
 from minio import Minio
 
 from pipeline_contracts import TABLES
-from pipeline_silver import get_silver_data_prefix, get_silver_manifest_key
 from common.paths import bronze_incremental_object_key
+from common.paths import silver_incremental_batch_paths
+from common.storage_layout import validate_storage_environment
+from common.manifest import canonical_manifest_identity
+
+
+PARENT_ORDERS_TABLES = {"payments", "shipments"}
 
 
 @task.branch(retries=0)
@@ -71,32 +76,87 @@ def verify_silver_manifest(table_name, validation_result):
     if not isinstance(validation_result, dict) or validation_result.get("table_name") != table_name or validation_result.get("status") != "PASS" or validation_result.get("checksum_verified") is not True:
         raise ValueError(f"Invalid Bronze validation for {table_name}")
     batch_id = validation_result.get("batch_id")
-    manifest_key = get_silver_manifest_key(table_name, batch_id)
+    storage_layout = validate_storage_environment()
+    silver_paths = silver_incremental_batch_paths(
+        table_name,
+        batch_id,
+        scope=storage_layout.scope,
+    )
+    manifest_key = silver_paths["manifest_key"]
     client = Minio("minio:9000", access_key=os.environ["MINIO_ACCESS_KEY"], secret_key=os.environ["MINIO_SECRET_KEY"], secure=False)
-    response = client.get_object(os.environ["BRONZE_BUCKET"], manifest_key)
+    response = client.get_object(storage_layout.bucket, manifest_key)
     try:
         manifest = json.loads(response.read().decode("utf-8"))
     finally:
         response.close(); response.release_conn()
-    prefix = get_silver_data_prefix(table_name, batch_id)
+    prefix = silver_paths["runs_prefix"]
+    context = get_current_context()
+    runtime_window_id = context["dag_run"].run_id
     if not isinstance(manifest, dict) or manifest.get("status") != "COMPLETED" or manifest.get("table_name") != table_name or manifest.get("batch_id") != batch_id or manifest.get("bronze_object_key") != validation_result["object_key"] or manifest.get("bronze_checksum_sha256") != validation_result["bronze_checksum_sha256"]:
         raise ValueError("Silver manifest metadata mismatch")
+    coverage = manifest.get("coverage")
+    if not isinstance(coverage, dict) or coverage.get("runtime_window_id") != runtime_window_id:
+        raise ValueError(f"Silver manifest missing current runtime coverage: {table_name}")
+    if not isinstance(coverage.get("coverage_identity"), str) or not coverage["coverage_identity"]:
+        raise ValueError(f"Silver manifest has malformed coverage identity: {table_name}")
+    if table_name == "orders":
+        if "parent_coverage_identity" in coverage or "parent_orders_reference" in coverage:
+            raise ValueError(f"Orders manifest has invalid parent coverage: {table_name}")
+    elif table_name in PARENT_ORDERS_TABLES:
+        parent_result = context["ti"].xcom_pull(task_ids="verify_silver_orders")
+        parent_coverage = parent_result.get("coverage") if isinstance(parent_result, dict) else None
+        parent_batch_id = parent_result.get("batch_id") if isinstance(parent_result, dict) else None
+        reference = coverage.get("parent_orders_reference")
+        parent_manifest_key = parent_result.get("manifest_key") if isinstance(parent_result, dict) else None
+        parent_manifest_identity = parent_result.get("manifest_identity") if isinstance(parent_result, dict) else None
+        if (
+            not isinstance(parent_result, dict)
+            or parent_result.get("table_name") != "orders"
+            or parent_result.get("status") != "PASS"
+            or not isinstance(parent_coverage, dict)
+            or parent_coverage.get("runtime_window_id") != runtime_window_id
+            or not isinstance(parent_coverage.get("coverage_identity"), str)
+            or coverage.get("parent_coverage_identity") != parent_coverage["coverage_identity"]
+            or not isinstance(reference, dict)
+            or reference.get("table") != "orders"
+            or reference.get("batch_id") != parent_batch_id
+            or reference.get("manifest_key") != parent_manifest_key
+            or reference.get("manifest_identity") != parent_manifest_identity
+        ):
+            raise ValueError(f"Silver manifest has malformed parent orders coverage: {table_name}")
     row_count, data_prefix, objects = manifest.get("silver_row_count"), manifest.get("data_prefix"), manifest.get("parquet_objects")
-    if type(row_count) is not int or row_count < 0 or not isinstance(data_prefix, str) or not data_prefix.startswith(prefix) or not re.fullmatch(rf"(?:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/)?silver_incremental/{table_name}/batch_id={batch_id}/runs/[0-9a-f]{{32}}/", data_prefix):
+    if (
+        type(row_count) is not int
+        or row_count < 0
+        or not isinstance(data_prefix, str)
+        or not data_prefix.startswith(prefix)
+        or not re.fullmatch(r"[0-9a-f]{32}/", data_prefix[len(prefix):])
+    ):
         raise ValueError("Invalid Silver manifest output metadata")
     if not isinstance(objects, list) or not objects or manifest.get("parquet_file_count") != len(objects):
         raise ValueError("Silver manifest has invalid Parquet metadata")
     expected = sorted(objects, key=lambda item: item["object_key"])
     if len({item["object_key"] for item in expected}) != len(expected) or any(not isinstance(item, dict) or not isinstance(item.get("object_key"), str) or not item["object_key"].startswith(data_prefix) or not item["object_key"].endswith(".parquet") or type(item.get("size")) is not int or item["size"] <= 0 for item in expected):
         raise ValueError("Invalid Silver Parquet metadata")
-    actual = sorted([{"object_key": item.object_name, "size": item.size, "etag": item.etag.strip('"')} for item in client.list_objects(os.environ["BRONZE_BUCKET"], prefix=data_prefix, recursive=True) if item.object_name.endswith(".parquet")], key=lambda item: item["object_key"])
+    actual = sorted([{"object_key": item.object_name, "size": item.size, "etag": item.etag.strip('"')} for item in client.list_objects(storage_layout.bucket, prefix=data_prefix, recursive=True) if item.object_name.endswith(".parquet")], key=lambda item: item["object_key"])
     if actual != expected:
         raise ValueError("Silver Parquet objects do not match completion manifest")
-    result = {"table_name": table_name, "status": "PASS", "batch_id": batch_id, "manifest_key": manifest_key, "silver_row_count": row_count}
+    # Gold must consume the explicit manifest selected and verified by this
+    # runtime.  Do not make downstream tasks rediscover historical objects.
+    result = {
+        "table_name": table_name,
+        "status": "PASS",
+        "batch_id": batch_id,
+        "manifest_key": manifest_key,
+        "manifest_keys": [manifest_key],
+        "manifest_identity": canonical_manifest_identity(manifest),
+        "silver_row_count": row_count,
+    }
     # Native Gold consumes the verified Silver Parquet manifest directly;
     # absence remains fail-closed in the lineage builder.
     if "dimensional_artifact" in manifest:
         result["dimensional_artifact"] = manifest["dimensional_artifact"]
+    result["coverage"] = coverage
     return result
 
 
@@ -134,7 +194,25 @@ def build_pipeline_summary(silver_results: dict, config: dict):
         if valid and config["mode"] == "DRY_RUN":
             valid = result.get("status") == "SKIPPED" and result.get("reason") == "DRY_RUN"
         elif valid and config["mode"] == "WRITE":
-            valid = (result.get("status") == "SKIPPED" and result.get("reason") == "NO_DATA") or (result.get("status") == "PASS" and isinstance(result.get("batch_id"), str) and bool(re.fullmatch(r"[0-9a-f]{32}", result["batch_id"])) and result.get("manifest_key") == get_silver_manifest_key(table_name, result["batch_id"]) and type(result.get("silver_row_count")) is int and result["silver_row_count"] >= 0)
+            if result.get("status") == "SKIPPED" and result.get("reason") == "NO_DATA":
+                valid = True
+            elif result.get("status") == "PASS":
+                batch_id = result.get("batch_id")
+                storage_layout = validate_storage_environment()
+                silver_paths = silver_incremental_batch_paths(
+                    table_name,
+                    batch_id,
+                    scope=storage_layout.scope,
+                )
+                valid = (
+                    isinstance(batch_id, str)
+                    and bool(re.fullmatch(r"[0-9a-f]{32}", batch_id))
+                    and result.get("manifest_key") == silver_paths["manifest_key"]
+                    and type(result.get("silver_row_count")) is int
+                    and result["silver_row_count"] >= 0
+                )
+            else:
+                valid = False
         else:
             valid = False
         if valid: completed[table_name] = result

@@ -1,4 +1,6 @@
 from pathlib import Path
+import csv
+import io
 
 from common.runtime_policy import require_feature_enabled
 import os
@@ -133,11 +135,37 @@ except ModuleNotFoundError as exc:
 load_dotenv(dotenv_path=".env")
 
 
+def get_parent_order_ids(conn, parent_orders_batch_id, staging_root="staging"):
+    """Read the verified orders batch scope without querying the source table."""
+    if parent_orders_batch_id is None:
+        return []
+    metadata = get_batch_metadata(conn, parent_orders_batch_id)
+    if metadata is None or metadata["table_name"] != "orders" or metadata["status"] != "COMMITTED":
+        raise RuntimeError("Current committed orders batch is required before child ingestion")
+    payload = load_staged_batch(metadata, staging_root=staging_root)
+    reader = csv.DictReader(io.StringIO(payload.decode("utf-8"), newline=""))
+    if reader.fieldnames is None or "order_id" not in reader.fieldnames:
+        raise ValueError("Orders staged batch is missing order_id")
+    order_ids = []
+    for row in reader:
+        try:
+            order_id = int(row["order_id"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Orders staged batch contains an invalid order_id") from exc
+        if order_id <= 0:
+            raise ValueError("Orders staged batch contains an invalid order_id")
+        order_ids.append(order_id)
+    if len(order_ids) != len(set(order_ids)):
+        raise ValueError("Orders staged batch contains duplicate order_id values")
+    return order_ids
+
+
 def prepare_pending_batch(
     conn,
     table_name,
     batch_size=1000,
     staging_root="staging",
+    parent_orders_batch_id=None,
 ):
     """
     Prepare and register one PENDING batch safely.
@@ -160,6 +188,7 @@ def prepare_pending_batch(
 
     # 3. Read current watermark
     watermark = get_watermark(conn, table_name)
+    parent_order_ids = get_parent_order_ids(conn, parent_orders_batch_id, staging_root) if table_name in ("payments", "shipments") else None
 
     # 4. Extract incremental rows
     batch = extract_incremental(
@@ -167,6 +196,7 @@ def prepare_pending_batch(
         table_name,
         watermark,
         batch_size=batch_size,
+        parent_order_ids=parent_order_ids,
     )
 
     if batch["row_count"] == 0:
@@ -241,6 +271,7 @@ def run_incremental_ingestion(
     staging_root="staging",
     dry_run=True,
     rollback_test=False,
+    parent_orders_batch_id=None,
 ):
     """
     Recovery-first orchestrator.
@@ -323,6 +354,7 @@ def execute_new_batch(
     table_name,
     batch_size=1000,
     staging_root="staging",
+    parent_orders_batch_id=None,
 ):
     """
     Prepare a new incremental batch.
@@ -355,6 +387,7 @@ def execute_new_batch(
         table_name=table_name,
         batch_size=batch_size,
         staging_root=staging_root,
+        parent_orders_batch_id=parent_orders_batch_id,
     )
 
     if result is None:
@@ -424,6 +457,7 @@ def execute_ingestion_action_locked(
     table_name,
     batch_size=1000,
     staging_root="staging",
+    parent_orders_batch_id=None,
 ):
     """
     Re-select and execute ingestion action under
@@ -470,6 +504,7 @@ def execute_ingestion_action_locked(
             table_name=table_name,
             batch_size=batch_size,
             staging_root=staging_root,
+            parent_orders_batch_id=parent_orders_batch_id,
         )
 
     return execute_ingestion_action(
@@ -568,6 +603,7 @@ def _execute_two_transaction_ingestion(
     table_name,
     batch_size=1000,
     staging_root="staging",
+    parent_orders_batch_id=None,
 ):
     """
     Internal two-transaction ingestion orchestrator.
@@ -612,6 +648,7 @@ def _execute_two_transaction_ingestion(
             table_name=table_name,
             batch_size=batch_size,
             staging_root=staging_root,
+            parent_orders_batch_id=parent_orders_batch_id,
         )
 
         status = result["status"]
@@ -801,6 +838,7 @@ def run_incremental_ingestion_write(
     batch_size=1000,
     staging_root="staging",
     allow_write=False,
+    parent_orders_batch_id=None,
 ):
     """
     Controlled incremental ingestion write entrypoint.
@@ -869,6 +907,7 @@ def run_incremental_ingestion_write(
         table_name=table_name,
         batch_size=batch_size,
         staging_root=staging_root,
+        parent_orders_batch_id=parent_orders_batch_id,
     )
 
     return {

@@ -12,7 +12,11 @@ if PROJECT_ROOT not in sys.path:
 
 from pipeline_contracts import TABLES
 from pipeline_operators import (create_gold_dimensional_confirmation_operator, create_gold_dimensional_operator, create_incremental_silver_operator)
-from pipeline_tasks.gold import build_dimensional_parquet_artifact_task, publish_gold_to_active_task
+from pipeline_tasks.gold import (
+    build_dimensional_parquet_artifact_task,
+    controlled_incremental_snapshot_reuse_dry_run_task,
+    publish_gold_to_active_task,
+)
 from pipeline_tasks.ingestion import ingest_incremental, validate_config, validate_incremental
 from pipeline_tasks.silver import check_silver_eligibility, silver_result, skip_silver, verify_silver_manifest
 
@@ -21,7 +25,7 @@ PROJECT_PATH = os.environ.get("AIRFLOW_DOCKER_PROJECT_PATH", PROJECT_ROOT)
 
 @dag(
     dag_id="ecommerce_incremental_ingestion",
-    schedule=None,
+    schedule="*/15 * * * *",
     start_date=datetime(2026, 1, 1),
     catchup=False,
     default_args={"retries": 1, "retry_delay": timedelta(minutes=1)},
@@ -35,8 +39,12 @@ def ecommerce_incremental_ingestion():
     with TaskGroup(group_id="bronze", prefix_group_id=False):
         for table in TABLES:
             with TaskGroup(group_id=f"bronze_{table}", prefix_group_id=False):
-                ingestion[table] = ingest_incremental.override(task_id=f"ingest_{table}")(table, config)
+                ingestion[table] = ingest_incremental.override(task_id=f"ingest_{table}")(
+                    table, config, ingestion.get("orders") if table in ("payments", "shipments") else None
+                )
                 validation[table] = validate_incremental.override(task_id=f"validate_{table}")(table, ingestion[table])
+                if table in ("payments", "shipments"):
+                    validation["orders"] >> ingestion[table]
 
     eligibility = {}
     transforms = {}
@@ -52,18 +60,30 @@ def ecommerce_incremental_ingestion():
                 results[table] = silver_result.override(task_id=f"silver_result_{table}")(table, validation[table])
                 skip = skip_silver.override(task_id=f"skip_silver_{table}")(table, validation[table])
                 eligibility[table] >> [skip, transforms[table]]
+                if table in ("payments", "shipments"):
+                    verify["orders"] >> transforms[table]
                 transforms[table] >> verify[table]
                 [skip, verify[table]] >> results[table]
                 dimensional_artifacts[table] = build_dimensional_parquet_artifact_task.override(
                     task_id=f"dimensional_parquet_artifact_{table}"
-                )(table, results[table])
-                verify[table] >> dimensional_artifacts[table]
+                )(table, results[table], config)
+                results[table] >> dimensional_artifacts[table]
     dimensional_writer = create_gold_dimensional_operator(
         project_path=PROJECT_PATH,
         mode=os.environ.get("GOLD_DIMENSIONAL_MODE", "DRY_RUN"),
     )
+    # Only the JSON-serializable config/spec crosses XCom.  The controlled task
+    # constructs its branded local reader/writer adapters at execution time.
+    controlled_snapshot_reuse_gate = controlled_incremental_snapshot_reuse_dry_run_task(
+        controlled_spec=config
+    )
+    controlled_snapshot_reuse_gate >> dimensional_writer
     list(dimensional_artifacts.values()) >> dimensional_writer
-    active_gold_publish = publish_gold_to_active_task(dimensional_writer)
+    active_gold_publish = publish_gold_to_active_task(dimensional_writer.output)
+    # Keep the publication barrier explicit in the graph as well as in the
+    # TaskFlow XComArg dependency, so the writer -> publish edge is preserved
+    # when Airflow renders the task graph.
+    dimensional_writer >> active_gold_publish
 
     with TaskGroup(group_id="gold_dimensions", prefix_group_id=False):
         dimension_confirmations = [

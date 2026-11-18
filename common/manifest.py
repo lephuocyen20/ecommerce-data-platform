@@ -1,6 +1,29 @@
 """Immutable JSON manifest primitives for MinIO-backed data layers."""
 
 import json
+import hashlib
+
+
+def canonical_manifest_identity(manifest):
+    """Return the canonical, non-circular SHA-256 identity of a manifest.
+
+    The identity fields are derived from the remaining manifest content and
+    therefore must not participate in their own hash.
+    """
+    if not isinstance(manifest, dict):
+        raise ValueError("JSON manifest payload must be an object")
+    payload = {
+        key: value
+        for key, value in manifest.items()
+        if key not in {"manifest_identity", "manifest_identities"}
+    }
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def read_json_object(client, bucket, object_key):

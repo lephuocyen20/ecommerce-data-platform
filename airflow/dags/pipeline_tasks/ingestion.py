@@ -99,8 +99,37 @@ def validate_unselected_ingestion_result(table_name, ingestion_result):
     raise ValueError(f"Unexpected unselected ingestion mode: {mode}")
 
 
+def resolve_parent_orders_batch_id(table_name, mode, parent_orders_result):
+    """Validate the verified orders result and return a WRITE batch id only."""
+    if table_name not in ("payments", "shipments"):
+        return None
+    if not isinstance(parent_orders_result, dict):
+        raise RuntimeError(f"Verified orders result is required before {table_name} ingestion")
+    if parent_orders_result.get("status") == "COMMITTED":
+        return parent_orders_result.get("batch_id")
+    if mode == DRY_RUN and (
+        (
+            parent_orders_result.get("status") == "SKIPPED"
+            and parent_orders_result.get("reason") == "DRY_RUN"
+        )
+        or (
+            parent_orders_result.get("mode") == DRY_RUN
+            and parent_orders_result.get("status") is None
+            and parent_orders_result.get("batch_id") is None
+            and isinstance(parent_orders_result.get("action"), str)
+            and bool(parent_orders_result["action"])
+        )
+    ):
+        # DRY_RUN verifies the parent contract without creating a committed
+        # batch. Children must not invent a parent batch id.
+        return None
+    if parent_orders_result.get("status") != "NO_DATA":
+        raise RuntimeError(f"Orders ingestion is not verified for {table_name}")
+    return None
+
+
 @task
-def ingest_incremental(table_name: str, config: dict):
+def ingest_incremental(table_name: str, config: dict, parent_orders_result: dict | None = None):
     if table_name not in config["tables"]:
         # Return a successful no-op instead of skipping the TaskFlow task.  FK
         # Completion gates must distinguish an intentionally unselected parent
@@ -116,6 +145,7 @@ def ingest_incremental(table_name: str, config: dict):
     )
     logger = logging.getLogger("airflow.task")
     mode = config["mode"]
+    parent_orders_batch_id = resolve_parent_orders_batch_id(table_name, mode, parent_orders_result)
     logger.info("Starting incremental ingestion | table=%s | mode=%s", table_name, mode)
     if mode == DRY_RUN:
         result = run_incremental_ingestion(
@@ -124,7 +154,8 @@ def ingest_incremental(table_name: str, config: dict):
     elif mode == WRITE:
         require_feature_enabled("INGESTION_WRITE_ENABLED", "WRITE blocked at ingestion task")
         result = run_incremental_ingestion_write(
-            table_name=table_name, batch_size=BATCH_SIZE, staging_root=STAGING_ROOT, allow_write=True
+            table_name=table_name, batch_size=BATCH_SIZE, staging_root=STAGING_ROOT, allow_write=True,
+            parent_orders_batch_id=parent_orders_batch_id,
         )
     else:
         raise ValueError(f"Unsupported mode: {mode}")

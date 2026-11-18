@@ -1,7 +1,6 @@
 """Recovery of PENDING and UPLOADED ingestion batches."""
 
 from .config import RECOVERABLE_STATUSES, VALID_CHECKSUM, get_table_config, validate_batch_id
-from .minio_storage import build_object_key
 from .staging import load_staged_batch
 
 
@@ -51,8 +50,15 @@ def validate_recovery_metadata(metadata):
             start_timestamp, start_id
         ) and metadata.get("replay_cursor_timestamp") is None:
             raise ValueError("Invalid timestamp watermark order")
-    if metadata["object_key"] != build_object_key(table_name, batch_id):
-        raise ValueError("Object key mismatch")
+    object_key = metadata["object_key"]
+    if (
+        not isinstance(object_key, str)
+        or not object_key
+        or object_key.startswith(("/", "\\"))
+        or "\\" in object_key
+        or any(part in {"", ".", ".."} for part in object_key.split("/"))
+    ):
+        raise ValueError("Invalid persisted object key")
     checksum = metadata["checksum_sha256"]
     if not isinstance(checksum, str) or not VALID_CHECKSUM.fullmatch(checksum):
         raise ValueError("Invalid SHA256 checksum")

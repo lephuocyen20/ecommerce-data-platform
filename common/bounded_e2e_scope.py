@@ -1,5 +1,7 @@
 """Fail-closed authorization and derived names for bounded E2E runs."""
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
 
