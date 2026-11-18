@@ -16,6 +16,7 @@ from pyspark.sql import SparkSession
 
 from common.minio import configure_s3a, create_minio_client
 from common.bounded_e2e_scope import BoundedE2EScopeError, build_bounded_e2e_scope
+from common.storage_layout import validate_storage_environment
 from gold.implementation.run_metadata import build_runtime_dimensional_metadata
 from gold.implementation.run_metadata_repository import persist_if_enabled
 from gold.implementation.dimensional.lineage import validate_dimensional_lineage, dimensional_lineage_identity
@@ -69,6 +70,79 @@ def load_artifacts(values):
     return artifacts
 
 
+def _preflight_reuse_artifacts(artifacts):
+    """Validate mixed inputs without constructing Spark, MinIO or Nessie clients."""
+    from gold.implementation.dimensional.snapshot_reuse import (
+        SnapshotReuseContractError, resolve_effective_gold_inputs,
+    )
+    from gold.implementation.dimensional.contracts import DIMENSIONAL_SOURCE_TABLES
+    if isinstance(artifacts, dict) and set(artifacts) == set(DIMENSIONAL_SOURCE_TABLES):
+        try:
+            return resolve_effective_gold_inputs(
+                artifacts,
+                reuse_artifacts={
+                    table: item["snapshot_reuse"]
+                    for table, item in artifacts.items()
+                    if isinstance(item, dict) and "snapshot_reuse" in item
+                },
+                feature_enabled=(
+                    os.environ.get("GOLD_INCREMENTAL_SNAPSHOT_REUSE_ENABLED", "false").lower()
+                    == "true"
+                ),
+            )
+        except SnapshotReuseContractError as exc:
+            raise ValueError(str(exc)) from exc
+    no_data = [
+        table for table, item in (artifacts or {}).items()
+        if isinstance(item, dict) and item.get("status") == "NO_DATA"
+    ]
+    if any(table not in {"customers", "products"} for table in no_data):
+        raise ValueError("Gold dimensional facts require current Silver PASS artifacts")
+    if no_data:
+        raise ValueError("Snapshot reuse requires the complete six-table Silver input set")
+    return {"version": 1, "status": "GOLD_READY", "reason": "SILVER_PASS"}
+
+
+def _build_runtime_merge_plan(spark, client, bucket, artifacts, lineage, scope):
+    from gold.implementation.dimensional.snapshot_reuse import (
+        GOLD_SNAPSHOT_REUSE, GoldSnapshotReuseAdapter, SnapshotReuseReader,
+        build_incremental_merge_plan, resolve_dimensional_inputs,
+        snapshot_reuse_enabled,
+    )
+    reuse_artifacts = {
+        table: item["snapshot_reuse"] for table, item in artifacts.items()
+        if isinstance(item, dict) and item.get("status") == "NO_DATA"
+    }
+    if not reuse_artifacts:
+        return None
+    resolved = resolve_dimensional_inputs(
+        artifacts,
+        reuse_artifacts=reuse_artifacts,
+        feature_enabled=snapshot_reuse_enabled(),
+    )
+    reused_tables = {
+        table for table, item in resolved["resolutions"].items()
+        if item.get("resolution") == GOLD_SNAPSHOT_REUSE
+    }
+    reader = SnapshotReuseReader(
+        spark=spark,
+        catalog_resolver=lambda **coordinates: ".".join(
+            (coordinates["catalog"], coordinates["namespace"], coordinates["table"])
+        ),
+    )
+    reused = {
+        table: GoldSnapshotReuseAdapter(reader=reader).read(
+            resolved["resolutions"][table]["artifact"]
+        )
+        for table in reused_tables
+    }
+    from gold.implementation.dimensional.reader import read_dimensional_sources
+    silver = read_dimensional_sources(
+        spark, client, bucket, lineage, scope, skip_tables=reused_tables
+    )
+    return build_incremental_merge_plan(resolved, silver, reused)
+
+
 def require_verified_graph(verification):
     """Make completed-graph verification part of WRITE success semantics."""
     if not isinstance(verification, dict) or verification.get("status") != "VERIFIED":
@@ -78,10 +152,21 @@ def require_verified_graph(verification):
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    storage_environment = dict(os.environ)
+    if "BRONZE_BUCKET" in storage_environment and storage_environment["BRONZE_BUCKET"] != args.bucket:
+        raise SystemExit("--bucket must match BRONZE_BUCKET")
+    storage_environment.setdefault("BRONZE_BUCKET", args.bucket)
+    layout = validate_storage_environment(storage_environment)
+    if args.mode == WRITE and layout.is_production and os.environ.get(
+        "PRODUCTION_LAKEHOUSE_WRITE_APPROVED"
+    ) != "1":
+        raise SystemExit(
+            "Production Gold WRITE requires PRODUCTION_LAKEHOUSE_WRITE_APPROVED=1"
+        )
     scope = None
-    if args.bucket == "ecommerce-data-lake":
+    if layout.scope is not None:
         try:
-            scope = build_bounded_e2e_scope(os.environ)
+            scope = layout.scope
         except BoundedE2EScopeError as exc:
             raise SystemExit(f"Refusing shared-bucket run: {exc}") from exc
         target_namespace = os.environ.get("GOLD_TARGET_NAMESPACE")
@@ -95,9 +180,15 @@ def main(argv=None):
             raise SystemExit("--nessie-ref must match the immutable E2E scope")
     elif args.warehouse or args.nessie_ref:
         raise SystemExit("Scoped warehouse/ref require ecommerce-data-lake")
-    if args.source_artifact:
+    artifacts = load_artifacts(args.source_artifact) if args.source_artifact else None
+    if artifacts:
         from gold.implementation.dimensional.lineage import build_dimensional_lineage_from_artifacts
-        lineage = build_dimensional_lineage_from_artifacts(load_artifacts(args.source_artifact), scope=scope)
+        effective = _preflight_reuse_artifacts(artifacts)
+        if effective["status"] == "GOLD_NO_CHANGE":
+            result = {"status": "GOLD_NO_CHANGE", "reason": "NO_CHANGE", "states": effective["states"]}
+            print("GOLD_DIMENSIONAL_RESULT=" + json.dumps(result, sort_keys=True), flush=True)
+            return result
+        lineage = build_dimensional_lineage_from_artifacts(artifacts, scope=scope)
     elif args.source_lineage:
         lineage = load_lineage(args.source_lineage)
         validate_dimensional_lineage(lineage, scope=scope)
@@ -114,9 +205,14 @@ def main(argv=None):
         spark = builder.getOrCreate()
         configure_s3a(spark)
         minio_client = create_minio_client()
+        merge_plan = _build_runtime_merge_plan(
+            spark, minio_client, args.bucket, artifacts, lineage, scope
+        ) if artifacts else None
         result = run_dimensional_graph(
             spark, minio_client, args.bucket, lineage,
             dim_date_start=args.dim_date_start, dim_date_end=args.dim_date_end, mode=args.mode, scope=scope,
+            merge_plan=merge_plan,
+            captured_at=started_at,
         )
         result["mode"] = args.mode
         if args.mode == WRITE:

@@ -29,7 +29,7 @@ EXPECTED_SCHEMA = RUN06_SCHEMA
 EXPECTED_TABLES = RUN06_TABLES
 HASH_RE = re.compile(r"^[0-9a-fA-F]{8,128}$")
 REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
-LOCAL_NESSIE_HOSTS = {"localhost", "127.0.0.1", "host.docker.internal"}
+LOCAL_NESSIE_HOSTS = {"localhost", "127.0.0.1", "host.docker.internal", "nessie"}
 LOCAL_NESSIE_PORTS = {19120, 19130, 19132}
 
 
@@ -214,9 +214,30 @@ class NessieRestAdapter:
 
     def get_ref(self, ref: str) -> NessieReference:
         payload = self._request("GET", f"/trees/{quote(ref, safe='')}")
-        name = _require_string(payload.get("name", ref), "Nessie reference name")
-        digest = _require_hash(payload.get("hash"), "Nessie reference hash")
-        return NessieReference(name=name, hash=digest, ref_type=str(payload.get("type", "BRANCH")).upper())
+        response = payload.get("reference") if "reference" in payload else payload
+        if not isinstance(response, dict):
+            raise PromotionError("Nessie GET response is missing required reference object")
+        name = _require_string(response.get("name"), "Nessie reference name")
+        if name != ref:
+            raise PromotionError("Nessie GET response name does not match requested ref")
+        digest = _require_hash(response.get("hash"), "Nessie reference hash")
+        ref_type = _require_string(response.get("type"), "Nessie reference type").upper()
+        if ref_type not in {"BRANCH", "TAG"}:
+            raise PromotionError("Nessie GET response type must be exactly BRANCH or TAG")
+        return NessieReference(name=name, hash=digest, ref_type=ref_type)
+
+    def create_branch(self, ref: str, source_ref: str, source_hash: str) -> NessieReference:
+        """Create an isolated branch at an explicitly read-back source hash."""
+        source_hash = _require_hash(source_hash, "Nessie branch source hash")
+        value = self._request(
+            "POST",
+            f"/trees?{urlencode({'name': ref, 'type': 'BRANCH'})}",
+            {"type": "DETACHED", "hash": source_hash},
+        )
+        response = value.get("reference") if isinstance(value, dict) and "reference" in value else value
+        if not isinstance(response, dict) or response.get("name") != ref or response.get("type", "").upper() != "BRANCH":
+            raise PromotionError("Nessie branch create response identity is invalid")
+        return NessieReference(ref, _require_hash(response.get("hash"), "Nessie branch hash"), "BRANCH")
 
     def create_tag(self, ref: str, target_hash: str) -> NessieReference:
         """Create an immutable TAG at an already verified commit hash."""
@@ -251,7 +272,9 @@ class NessieRestAdapter:
         expected_current_hash = _require_hash(expected_current_hash, "expected_current_hash")
         payload = self._request(
             "PUT",
-            f"/trees/{quote(ref, safe='')}?expectedHash={quote(expected_current_hash, safe='')}",
+            # Nessie v2 encodes the expected current HEAD in the ref path
+            # (name@hash).  This is the server-side compare-and-swap guard.
+            f"/trees/{quote(f'{ref}@{expected_current_hash}', safe='@')}",
             {"type": "BRANCH", "name": ref, "hash": target_hash},
         )
         return self._parse_reference(payload, ref, "BRANCH")

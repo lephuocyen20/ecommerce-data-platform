@@ -1,8 +1,12 @@
 """Declarative contracts for the first Iceberg Gold star-schema slice."""
 
+import hashlib
+import json
+
 from gold.implementation.gold_table_registry import GOLD_TABLES
 
 DIMENSIONAL_GOLD_VERSION = "1.0"
+GOLD_SNAPSHOT_METADATA_VERSION = 2
 UNKNOWN_KEY = -1
 DIMENSIONAL_CATALOG = "lakehouse"
 DIMENSIONAL_NAMESPACE = "gold"
@@ -84,6 +88,30 @@ TABLE_MERGE_KEYS = {
 }
 
 WRITE_ORDER = GOLD_TABLES
+
+
+def canonical_contract_identity(value, *, identity_field="identity"):
+    """Hash JSON-safe contract content while excluding its self-identity field."""
+    if not isinstance(value, dict):
+        raise ValueError("Contract identity requires a mapping")
+    body = {key: item for key, item in value.items() if key != identity_field}
+    encoded = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def table_schema_metadata(table):
+    """Return the frozen schema payload used by the versioned snapshot contract."""
+    if table not in TABLE_SCHEMA:
+        raise ValueError(f"Unsupported dimensional Gold table: {table}")
+    return {
+        "table": table,
+        "columns": list(TABLE_COLUMNS[table]),
+        "schema": [list(field) for field in TABLE_SCHEMA[table]],
+    }
+
+
+def table_schema_identity(table):
+    return canonical_contract_identity(table_schema_metadata(table))
 
 def get_dimensional_contract(name):
     if name in DIMENSIONAL_TABLES: return DIMENSIONAL_TABLES[name]

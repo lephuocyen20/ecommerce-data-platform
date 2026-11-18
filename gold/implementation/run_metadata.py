@@ -7,11 +7,12 @@ from datetime import datetime, timezone
 
 
 REQUIRED_FIELDS = {"run_id", "bronze_batch_ids", "silver_snapshots", "iceberg_snapshots", "attestations", "evidence", "gold_snapshot_id", "status", "code_sha", "started_at", "completed_at", "duration_seconds", "rows_read", "rows_written", "rows_rejected"}
+OPTIONAL_FIELDS = {"gold_snapshot_metadata"}
 _SHA = re.compile(r"^[a-f0-9]{7,64}$")
 
 
 def build_gold_run_metadata(**values):
-    if set(values) != REQUIRED_FIELDS:
+    if not REQUIRED_FIELDS.issubset(values) or set(values) - REQUIRED_FIELDS - OPTIONAL_FIELDS:
         raise ValueError("Unexpected Gold run metadata fields")
     if not isinstance(values["run_id"], str) or not values["run_id"]:
         raise ValueError("run_id is required")
@@ -36,6 +37,20 @@ def build_gold_run_metadata(**values):
         raise ValueError("Lineage mappings must cover the same non-empty tables")
     if values["status"] == "PASS" and (not isinstance(values["gold_snapshot_id"], str) or not values["gold_snapshot_id"].startswith("gold_snap_")):
         raise ValueError("PASS requires a Gold snapshot ID")
+    metadata = values.get("gold_snapshot_metadata")
+    if metadata is not None:
+        if not isinstance(metadata, dict):
+            raise ValueError("gold_snapshot_metadata must be a mapping")
+        required_snapshot_fields = {
+            "schema_identity", "graph_identity", "manifest_identity", "snapshot_id",
+            "catalog", "namespace", "ref", "stale_policy", "readback_identity",
+        }
+        if values["status"] == "PASS":
+            for table, item in metadata.items():
+                if not isinstance(table, str) or not isinstance(item, dict) or not required_snapshot_fields.issubset(item):
+                    raise ValueError(f"PASS snapshot metadata is incomplete: {table}")
+                if item.get("status", "PASS") != "PASS":
+                    raise ValueError(f"PASS snapshot metadata is not PASS: {table}")
     return dict(values)
 
 
@@ -57,6 +72,29 @@ def build_runtime_dimensional_metadata(*, lineage, result, mode, environment=Non
     status = "PASS" if mode == "WRITE" and result.get("status") in {"PUBLISHED", "ALREADY_PUBLISHED"} else "DRY_RUN"
     graph_identity = result.get("graph", {}).get("identity")
     gold_snapshot_id = f"gold_snap_{graph_identity}" if status == "PASS" and graph_identity else None
+    snapshot_metadata = {
+        item["table"]: {
+            "status": "PASS",
+            "schema_identity": item["manifest"].get("schema_identity"),
+            "graph_identity": item["manifest"].get("graph_identity"),
+            "manifest_identity": item["manifest"].get("manifest_identity", item["manifest"].get("identity")),
+            "snapshot_id": item["manifest"].get("snapshot_id"),
+            "catalog": item["manifest"].get("catalog", "lakehouse"),
+            "namespace": item["manifest"].get("namespace", "gold"),
+            "ref": item["manifest"].get("ref", "main"),
+            "stale_policy": item["manifest"].get("stale_policy"),
+            "readback_identity": item["manifest"].get("readback_identity") or (
+                item["manifest"].get("quality", {}).get("readback", {}).get("identity")
+                if isinstance(item["manifest"].get("quality"), dict) else None
+            ),
+        }
+        for item in result.get("tables", [])
+        if isinstance(item, dict) and isinstance(item.get("manifest"), dict)
+    } if status == "PASS" and result.get("tables") and all(
+        isinstance(item, dict) and isinstance(item.get("manifest"), dict)
+        and item["manifest"].get("version") == 2
+        for item in result.get("tables", [])
+    ) else None
     if all(source.get("source_type") == "parquet_manifest" for source in sources.values()):
         silver_ids = {table: source["manifest_identity"] for table, source in sources.items()}
         gold_ids = {
@@ -83,6 +121,7 @@ def build_runtime_dimensional_metadata(*, lineage, result, mode, environment=Non
             rows_read=sum(source.get("row_count", 0) for source in sources.values()),
             rows_written=sum(item.get("row_count", 0) for item in result.get("quality", {}).values()),
             rows_rejected=0,
+            **({"gold_snapshot_metadata": snapshot_metadata} if snapshot_metadata is not None else {}),
         )
     return build_gold_run_metadata(
         run_id=run_id,
@@ -100,4 +139,5 @@ def build_runtime_dimensional_metadata(*, lineage, result, mode, environment=Non
         rows_read=sum(source.get("row_count", 0) for source in sources.values()),
         rows_written=sum(item.get("row_count", 0) for item in result.get("quality", {}).values()),
         rows_rejected=0,
+        **({"gold_snapshot_metadata": snapshot_metadata} if snapshot_metadata is not None else {}),
     )

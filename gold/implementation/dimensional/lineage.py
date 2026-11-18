@@ -9,6 +9,8 @@ from lakehouse.attestation import verify_snapshot_attestation
 
 ICEBERG_SNAPSHOT = "iceberg_snapshot"
 PARQUET_MANIFEST = "parquet_manifest"
+MIXED_LINEAGE = "mixed"
+GOLD_SNAPSHOT_REUSE_SOURCE = "gold_snapshot_reuse"
 LINEAGE_VERSION = 1
 SOURCE_CONTRACT_VERSION = 1
 DEFAULT_LATE_DATA_POLICY = {"mode": "overlap_reprocess", "overlap_days": 2, "watermark": "updated_at"}
@@ -82,19 +84,25 @@ def _evidence(value, field, source):
 
 
 def validate_dimensional_lineage(lineage, scope=None):
-    if not isinstance(lineage, dict) or not {"version", "source_type", "sources"} <= set(lineage) or set(lineage) - {"version", "source_type", "sources", "source_contract"}:
+    if not isinstance(lineage, dict) or not {"version", "source_type", "sources"} <= set(lineage) or set(lineage) - {"version", "source_type", "sources", "source_contract", "legacy_coverage_compatibility"}:
         raise DimensionalLineageError("Invalid dimensional lineage envelope")
-    if lineage["version"] != LINEAGE_VERSION or lineage["source_type"] not in {ICEBERG_SNAPSHOT, PARQUET_MANIFEST}:
+    if "legacy_coverage_compatibility" in lineage and lineage["legacy_coverage_compatibility"] is not True:
+        raise DimensionalLineageError("Invalid legacy coverage compatibility marker")
+    if lineage["version"] != LINEAGE_VERSION or lineage["source_type"] not in {ICEBERG_SNAPSHOT, PARQUET_MANIFEST, MIXED_LINEAGE}:
         raise DimensionalLineageError("Dimensional Gold requires verified Silver lineage")
     if not isinstance(lineage["sources"], dict) or set(lineage["sources"]) != set(DIMENSIONAL_SOURCE_TABLES):
         raise DimensionalLineageError("Dimensional source set does not match graph contract")
     fields = {"source_type", "table", "catalog", "namespace", "ref", "snapshot_id", "snapshot_attestation_identity", "reconciliation_evidence", "quality_evidence"}
     for table in DIMENSIONAL_SOURCE_TABLES:
         source = lineage["sources"][table]
-        if lineage["source_type"] == PARQUET_MANIFEST:
+        source_type = source.get("source_type") if lineage["source_type"] == MIXED_LINEAGE else lineage["source_type"]
+        if source_type == PARQUET_MANIFEST:
             _validate_parquet_source(source, table, scope=scope)
             continue
-        if not isinstance(source, dict) or not fields <= set(source) or set(source) - fields - {"schema_fingerprint", "delete_count", "reprocess_required", "bronze_batch_id", "row_count"}:
+        if source_type == GOLD_SNAPSHOT_REUSE_SOURCE:
+            _validate_gold_snapshot_reuse_source(source, table)
+            continue
+        if not isinstance(source, dict) or not fields <= set(source) or set(source) - fields - {"schema_fingerprint", "delete_count", "reprocess_required", "bronze_batch_id", "row_count", "coverage"}:
             raise DimensionalLineageError(f"Unexpected lineage fields for {table}")
         if "delete_count" in source and (not isinstance(source["delete_count"], int) or source["delete_count"] < 0):
             raise DimensionalLineageError(f"Invalid delete_count for {table}")
@@ -129,7 +137,7 @@ def validate_dimensional_lineage(lineage, scope=None):
 def _validate_parquet_source(source, table, *, scope=None):
     """Validate an immutable Silver completion manifest reference."""
     fields = {"source_type", "table", "bucket", "manifest_key", "data_prefix", "manifest_identity", "batch_id", "row_count", "manifest_keys", "manifest_identities", "data_prefixes"}
-    if not isinstance(source, dict) or not fields <= set(source) or set(source) - fields - {"bronze_batch_id"}:
+    if not isinstance(source, dict) or not fields <= set(source) or set(source) - fields - {"bronze_batch_id", "coverage"}:
         raise DimensionalLineageError(f"Invalid Parquet lineage fields for {table}")
     if source["source_type"] != PARQUET_MANIFEST or source["table"] != table:
         raise DimensionalLineageError(f"Parquet source type/table mismatch for {table}")
@@ -175,26 +183,64 @@ def dimensional_lineage_identity(lineage, *, scope=None):
     return hashlib.sha256(canonical_dimensional_lineage(lineage, scope=scope).encode("utf-8")).hexdigest()
 
 
+def _validate_gold_snapshot_reuse_source(source, table):
+    expected = {"source_type", "table", "catalog", "namespace", "ref", "snapshot_id", "graph_identity", "manifest_identity", "schema_identity", "readback"}
+    if not isinstance(source, dict) or set(source) != expected:
+        raise DimensionalLineageError(f"Invalid Gold snapshot reuse lineage for {table}")
+    expected_table = {"customers": "dim_customer", "products": "dim_product"}.get(table)
+    if source.get("source_type") != GOLD_SNAPSHOT_REUSE_SOURCE or source.get("table") != expected_table:
+        raise DimensionalLineageError(f"Gold snapshot reuse source mismatch for {table}")
+    if (source.get("catalog"), source.get("namespace")) != ("lakehouse", "gold") or not isinstance(source.get("ref"), str) or not source["ref"]:
+        raise DimensionalLineageError(f"Gold snapshot reuse location mismatch for {table}")
+    if not isinstance(source.get("snapshot_id"), int) or source["snapshot_id"] <= 0:
+        raise DimensionalLineageError(f"Invalid reused snapshot_id for {table}")
+    for field in ("graph_identity", "manifest_identity", "schema_identity"):
+        if not isinstance(source.get(field), str) or _SHA256.fullmatch(source[field]) is None:
+            raise DimensionalLineageError(f"Invalid reused {field} for {table}")
+    readback = source.get("readback")
+    if not isinstance(readback, dict) or readback.get("status") != "PASS" or readback.get("snapshot_id") != source["snapshot_id"]:
+        raise DimensionalLineageError(f"Invalid reused readback for {table}")
+
+
 def build_dimensional_lineage_from_artifacts(artifacts, *, scope=None):
-    """Build lineage from six verified Silver artifacts."""
+    """Build lineage from verified Silver artifacts and pinned reused dimensions."""
     if not isinstance(artifacts, dict) or set(artifacts) != set(DIMENSIONAL_SOURCE_TABLES):
         raise DimensionalLineageError("Dimensional Gold requires six Silver artifact envelopes")
     sources = {}
     for table in DIMENSIONAL_SOURCE_TABLES:
         artifact = artifacts[table]
-        if not isinstance(artifact, dict) or artifact.get("status") != "PASS":
+        if not isinstance(artifact, dict):
+            raise DimensionalLineageError(f"Silver artifact verification failed: {table}")
+        if artifact.get("status") == "NO_DATA":
+            reuse = artifact.get("snapshot_reuse")
+            snapshot = reuse.get("snapshot") if isinstance(reuse, dict) else None
+            if table not in {"customers", "products"} or not isinstance(snapshot, dict):
+                raise DimensionalLineageError(f"Fact or unverified dimension NO_DATA: {table}")
+            sources[table] = {"source_type": GOLD_SNAPSHOT_REUSE_SOURCE, **{
+                field: snapshot.get(field) for field in (
+                    "table", "catalog", "namespace", "ref", "snapshot_id",
+                    "graph_identity", "manifest_identity", "schema_identity", "readback"
+                )
+            }}
+            continue
+        if artifact.get("status") != "PASS":
             raise DimensionalLineageError(f"Silver artifact verification failed: {table}")
         lineage = artifact.get("parquet_lineage") or artifact.get("iceberg_lineage")
         if not isinstance(lineage, dict):
             raise DimensionalLineageError(f"Missing verified Silver lineage artifact: {table}")
         sources[table] = lineage
-    source_type = "parquet_manifest" if all(item.get("source_type") == PARQUET_MANIFEST for item in sources.values()) else ICEBERG_SNAPSHOT
+    source_types = {item.get("source_type") for item in sources.values()}
+    source_type = next(iter(source_types)) if len(source_types) == 1 else MIXED_LINEAGE
     envelope = {"version": LINEAGE_VERSION, "source_type": source_type, "sources": sources}
+    if all("coverage" not in source for source in sources.values()) and all(
+        artifact.get("legacy_coverage_compatibility") is True for artifact in artifacts.values()
+    ):
+        envelope["legacy_coverage_compatibility"] = True
     validate_dimensional_lineage(envelope, scope=scope)
     return envelope
 
 
-def build_parquet_lineage_artifact(*, table, bucket, manifest_key, data_prefix, manifest_identity, batch_id, row_count, bronze_batch_id=None, manifest_keys=None, manifest_identities=None, data_prefixes=None):
+def build_parquet_lineage_artifact(*, table, bucket, manifest_key, data_prefix, manifest_identity, batch_id, row_count, bronze_batch_id=None, manifest_keys=None, manifest_identities=None, data_prefixes=None, coverage=None, legacy_coverage_compatibility=False):
     manifest_keys = list(manifest_keys or [manifest_key])
     manifest_identities = list(manifest_identities or [manifest_identity])
     data_prefixes = list(data_prefixes or [data_prefix])
@@ -213,7 +259,12 @@ def build_parquet_lineage_artifact(*, table, bucket, manifest_key, data_prefix, 
     }
     if bronze_batch_id is not None:
         source["bronze_batch_id"] = bronze_batch_id
-    return {"status": "PASS", "parquet_lineage": source}
+    if coverage is not None:
+        source["coverage"] = coverage
+    artifact = {"status": "PASS", "parquet_lineage": source}
+    if legacy_coverage_compatibility:
+        artifact["legacy_coverage_compatibility"] = True
+    return artifact
 
 
 def normalize_dimensional_artifact(table, attestation, reconciliation, quality, *, bronze_batch_id=None, row_count=None):
