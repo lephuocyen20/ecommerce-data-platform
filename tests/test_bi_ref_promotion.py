@@ -23,6 +23,22 @@ HASH = "a" * 64
 CURRENT_HASH = "b" * 64
 
 
+def test_nessie_service_hostname_is_allowed_for_compose_runtime():
+    adapter = NessieRestAdapter("http://nessie:19120/api/v2")
+    assert adapter.base_uri == "http://nessie:19120/api/v2"
+
+
+def test_nessie_adapter_exposes_candidate_branch_creation_contract(monkeypatch):
+    adapter = NessieRestAdapter("http://nessie:19120/api/v2")
+    monkeypatch.setattr(adapter, "_request", lambda method, path, body=None: {
+        "name": "gold_prod_candidate_test", "type": "BRANCH", "hash": HASH,
+    })
+    result = adapter.create_branch("gold_prod_candidate_test", "gold_prod_current", HASH)
+    assert result.name == "gold_prod_candidate_test"
+    assert result.ref_type == "BRANCH"
+    assert result.hash == HASH
+
+
 def manifest(**overrides):
     value = {
         "status": "VERIFIED",
@@ -220,6 +236,39 @@ def test_nessie_v2_create_shape_is_immutable_tag(monkeypatch):
     )]
 
 
+def test_nessie_v2_get_ref_reads_nested_reference_envelope(monkeypatch):
+    adapter = NessieRestAdapter("http://host.docker.internal:19132/api/v2")
+    calls = []
+
+    def request(method, path, body=None):
+        calls.append((method, path, body))
+        return {"reference": {"name": "bi_gold_current", "hash": HASH, "type": "BRANCH"}}
+
+    monkeypatch.setattr(adapter, "_request", request)
+    current = adapter.get_ref("bi_gold_current")
+
+    assert current == NessieReference("bi_gold_current", HASH, "BRANCH")
+    assert calls == [("GET", "/trees/bi_gold_current", None)]
+
+
+def test_nessie_v2_branch_update_uses_expected_hash_in_ref_path(monkeypatch):
+    adapter = NessieRestAdapter("http://host.docker.internal:19132/api/v2")
+    calls = []
+
+    def request(method, path, body=None):
+        calls.append((method, path, body))
+        return {"reference": {"name": "bi_gold_current", "hash": HASH, "type": "BRANCH"}}
+
+    monkeypatch.setattr(adapter, "_request", request)
+    updated = adapter.update_branch("bi_gold_current", HASH, CURRENT_HASH)
+    assert updated == NessieReference("bi_gold_current", HASH, "BRANCH")
+    assert calls == [(
+        "PUT",
+        f"/trees/bi_gold_current@{CURRENT_HASH}",
+        {"type": "BRANCH", "name": "bi_gold_current", "hash": HASH},
+    )]
+
+
 @pytest.mark.parametrize(
     ("payload", "message"),
     [
@@ -267,8 +316,8 @@ def test_cli_rejects_non_local_nessie_uri_before_rest_request(tmp_path, capsys):
         "--nessie-uri", "https://nessie.production.example/api/v2",
     ]) == 2
     assert "approved local" in capsys.readouterr().err
-    with pytest.raises(PromotionError):
-        NessieRestAdapter("http://nessie:19120/api/v2")
+    adapter = NessieRestAdapter("http://nessie:19120/api/v2")
+    assert adapter.base_uri == "http://nessie:19120/api/v2"
 
 
 def test_source_has_no_data_engine_or_object_write_clients():

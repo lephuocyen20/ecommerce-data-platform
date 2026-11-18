@@ -5,7 +5,7 @@ from lakehouse.models.spec import SPECS
 
 
 def test_local_fixture_is_allowlisted_to_quality_bucket():
-    assert LOCAL_BUCKET == "ecommerce-quality-it"
+    assert LOCAL_BUCKET == "ecommerce-lakehouse-quality-it"
     assert "ecommerce-data-lake" not in LOCAL_BUCKET
     assert len(TABLES) == 6
 

@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
+from psycopg2 import sql
+from psycopg2.extensions import adapt
 
 import pytest
 
@@ -204,3 +206,78 @@ def test_timestamp_incremental_sql_structure():
     assert "ORDER BY" in sql_text
     assert "LIMIT %s" in sql_text
     assert params == (ts, 100, 50)
+
+
+@pytest.mark.parametrize(
+    ("table_name", "primary_key"),
+    [("payments", "payment_id"), ("shipments", "shipment_id")],
+    ids=["payments", "shipments"],
+)
+def test_child_incremental_binds_parent_scope_as_postgresql_array(table_name, primary_key):
+    conn, cursor = make_connection()
+    ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    cursor.description = [(name,) for name in (primary_key, "order_id", "updated_at", "_is_deleted", "deleted_at")]
+    cursor.fetchall.return_value = [(101, 11, datetime(2026, 1, 2, tzinfo=timezone.utc), False, None)]
+    watermark = {"watermark_type": "TIMESTAMP", "last_timestamp": ts, "last_id": 100}
+    with patch.object(
+        extractor,
+        "get_table_config",
+        return_value={"primary_key": primary_key, "watermark_column": "updated_at", "watermark_type": "TIMESTAMP"},
+    ):
+        extractor.extract_incremental(conn, table_name, watermark, batch_size=25, parent_order_ids=[11, 12])
+    query, params = cursor.execute.call_args.args
+    assert "ANY(%s)" in str(query)
+    assert params == (ts, 100, [11, 12], 25)
+    assert adapt(params[2]).getquoted() == b"ARRAY[11,12]"
+
+
+def test_empty_parent_scope_returns_no_data_without_source_query():
+    conn, cursor = make_connection()
+    result = extractor.extract_incremental(
+        conn,
+        "shipments",
+        {"watermark_type": "TIMESTAMP", "last_timestamp": None, "last_id": 0},
+        parent_order_ids=[],
+    )
+    assert result["row_count"] == 0
+    cursor.execute.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("table_name", "primary_key"),
+    [("payments", "payment_id"), ("shipments", "shipment_id")],
+    ids=["payments", "shipments"],
+)
+def test_replay_child_scope_uses_array_any_and_exact_parameter_order(monkeypatch, table_name, primary_key):
+    monkeypatch.setenv("LATE_DATA_OVERLAP_ENABLED", "true")
+    conn, cursor = make_connection()
+    last_timestamp = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    upper_timestamp = datetime(2026, 1, 3, tzinfo=timezone.utc)
+    cursor.fetchone.return_value = (upper_timestamp, 101)
+    cursor.description = [(name,) for name in (primary_key, "order_id", "updated_at", "_is_deleted", "deleted_at")]
+    cursor.fetchall.return_value = [(101, 11, upper_timestamp, False, None)]
+
+    result = extractor.extract_incremental(
+        conn,
+        table_name,
+        {
+            "watermark_type": "TIMESTAMP",
+            "last_timestamp": last_timestamp,
+            "last_id": 100,
+            "replay_cursor_timestamp": last_timestamp,
+            "replay_cursor_id": 0,
+            "replay_upper_timestamp": None,
+        },
+        batch_size=25,
+        parent_order_ids=[11, 12],
+    )
+
+    upper_query, upper_params = cursor.execute.call_args_list[0].args
+    replay_query, replay_params = cursor.execute.call_args_list[1].args
+    assert str(upper_query).count("ANY(%s)") == 2
+    assert str(replay_query).count("ANY(%s)") == 1
+    assert upper_params == ([11, 12], [11, 12])
+    assert replay_params == (last_timestamp, 0, upper_timestamp, 101, [11, 12], 25)
+    assert all(adapt(params).getquoted() == b"ARRAY[11,12]" for params in upper_params)
+    assert adapt(replay_params[4]).getquoted() == b"ARRAY[11,12]"
+    assert result["row_count"] == 1

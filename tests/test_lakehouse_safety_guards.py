@@ -113,6 +113,70 @@ def test_spark_factory_uses_bounded_retry_and_timeout(monkeypatch):
     )
 
 
+def test_historical_spark_factory_forwards_gold_dimensional_flags(monkeypatch):
+    class _DockerOperator:
+        def __init__(self, **kwargs): self.kwargs = kwargs
+    class _Mount:
+        def __init__(self, **kwargs): self.kwargs = kwargs
+    docker_operator = types.ModuleType("airflow.providers.docker.operators.docker"); docker_operator.DockerOperator = _DockerOperator
+    empty_operator = types.ModuleType("airflow.providers.standard.operators.empty"); empty_operator.EmptyOperator = object
+    airflow_exceptions = types.ModuleType("airflow.exceptions")
+    airflow_exceptions.AirflowSkipException = type("AirflowSkipException", (Exception,), {})
+    docker_types = types.ModuleType("docker.types"); docker_types.Mount = _Mount
+    airflow_dags = types.ModuleType("airflow.dags")
+    airflow_dags.__path__ = []
+    pipeline_contracts = types.ModuleType("airflow.dags.pipeline_contracts")
+    pipeline_contracts.TABLES = ("customers", "products", "orders", "order_items", "payments", "shipments")
+    for name, module in {"airflow": types.ModuleType("airflow"), "airflow.exceptions": airflow_exceptions, "airflow.dags": airflow_dags, "airflow.dags.pipeline_contracts": pipeline_contracts, "airflow.providers": types.ModuleType("airflow.providers"), "airflow.providers.docker": types.ModuleType("airflow.providers.docker"), "airflow.providers.docker.operators": types.ModuleType("airflow.providers.docker.operators"), "airflow.providers.docker.operators.docker": docker_operator, "airflow.providers.standard": types.ModuleType("airflow.providers.standard"), "airflow.providers.standard.operators": types.ModuleType("airflow.providers.standard.operators"), "airflow.providers.standard.operators.empty": empty_operator, "docker": types.ModuleType("docker"), "docker.types": docker_types}.items(): monkeypatch.setitem(sys.modules, name, module)
+    path = Path(__file__).parents[1] / "airflow/dags/pipeline_operators.py"; spec = importlib.util.spec_from_file_location("pipeline_operators_historical_flags_test", path); operators = importlib.util.module_from_spec(spec); spec.loader.exec_module(operators)
+    monkeypatch.setenv("MINIO_ENDPOINT", "minio:9000"); monkeypatch.setenv("MINIO_ACCESS_KEY", "key"); monkeypatch.setenv("MINIO_SECRET_KEY", "secret"); monkeypatch.setenv("BRONZE_BUCKET", "bronze")
+    monkeypatch.setenv("HISTORICAL_BACKFILL_WRITE_APPROVED", "1")
+    monkeypatch.setenv("GOLD_DIMENSIONAL_MODE", "WRITE")
+    monkeypatch.setenv("GOLD_DIMENSIONAL_ENABLED", "true")
+    monkeypatch.setenv("GOLD_DIMENSIONAL_WRITE_ENABLED", "true")
+
+    task = operators.create_historical_spark_operator(
+        task_id="historical_gold",
+        project_path="C:\\project",
+        stage="gold",
+        input_argument="--silver-artifacts-json",
+        plan_value={"run_id": "run-abc"},
+        input_value={"status": "PASS"},
+    )
+
+    environment = task.kwargs["private_environment"]
+    assert environment["HISTORICAL_BACKFILL_WRITE_APPROVED"] == "1"
+    assert environment["GOLD_DIMENSIONAL_MODE"] == "WRITE"
+    assert environment["GOLD_DIMENSIONAL_ENABLED"] == "true"
+    assert environment["GOLD_DIMENSIONAL_WRITE_ENABLED"] == "true"
+
+
+def test_spark_factory_propagates_quality_run_scope(monkeypatch):
+    class _DockerOperator:
+        def __init__(self, **kwargs): self.kwargs = kwargs
+    class _Mount:
+        def __init__(self, **kwargs): self.kwargs = kwargs
+    docker_operator = types.ModuleType("airflow.providers.docker.operators.docker"); docker_operator.DockerOperator = _DockerOperator
+    empty_operator = types.ModuleType("airflow.providers.standard.operators.empty"); empty_operator.EmptyOperator = object
+    airflow_exceptions = types.ModuleType("airflow.exceptions"); airflow_exceptions.AirflowSkipException = type("AirflowSkipException", (Exception,), {})
+    docker_types = types.ModuleType("docker.types"); docker_types.Mount = _Mount
+    for name, module in {"airflow": types.ModuleType("airflow"), "airflow.exceptions": airflow_exceptions, "airflow.providers": types.ModuleType("airflow.providers"), "airflow.providers.docker": types.ModuleType("airflow.providers.docker"), "airflow.providers.docker.operators": types.ModuleType("airflow.providers.docker.operators"), "airflow.providers.docker.operators.docker": docker_operator, "airflow.providers.standard": types.ModuleType("airflow.providers.standard"), "airflow.providers.standard.operators": types.ModuleType("airflow.providers.standard.operators"), "airflow.providers.standard.operators.empty": empty_operator, "docker": types.ModuleType("docker"), "docker.types": docker_types}.items(): monkeypatch.setitem(sys.modules, name, module)
+    path = Path(__file__).parents[1] / "airflow/dags/pipeline_operators.py"
+    spec = importlib.util.spec_from_file_location("pipeline_operators_quality_scope_test", path)
+    operators = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(operators)
+    monkeypatch.setenv("MINIO_ENDPOINT", "minio:9000")
+    monkeypatch.setenv("MINIO_ACCESS_KEY", "key")
+    monkeypatch.setenv("MINIO_SECRET_KEY", "secret")
+    monkeypatch.setenv("BRONZE_BUCKET", "ecommerce-lakehouse-quality-it")
+    monkeypatch.setenv("QUALITY_IT_RUN_ID", "quality-run")
+    monkeypatch.setenv("QUALITY_IT_PREFIX", "quality-it/quality-run/")
+    task = operators.create_spark_submit_operator(task_id="quality", project_path="C:\\project", script_path="/job.py")
+    environment = task.kwargs["private_environment"]
+    assert environment["QUALITY_IT_RUN_ID"] == "quality-run"
+    assert environment["QUALITY_IT_PREFIX"] == "quality-it/quality-run/"
+
+
 def test_quality_cli_uses_absolute_imports_for_spark_submit():
     from pathlib import Path
 

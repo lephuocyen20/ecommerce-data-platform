@@ -42,7 +42,7 @@ def test_local_quality_it_avoids_external_mc_image_dependency():
 
 def test_local_quality_it_overrides_spark_defaults_for_quality_bucket():
     defaults = (ROOT / "spark" / "conf" / "spark-defaults.quality-it.local.conf").read_text(encoding="utf-8")
-    assert "s3a://ecommerce-quality-it/lakehouse" in defaults
+    assert "s3a://ecommerce-lakehouse-quality-it/lakehouse" in defaults
     assert "http://nessie:19120/api/v2" in defaults
     assert "host.docker.internal:9000" in defaults
     assert "./spark/conf/spark-defaults.quality-it.local.conf:/opt/spark/conf/spark-defaults.conf:ro" in _compose()["services"]["spark"]["volumes"]
@@ -50,7 +50,7 @@ def test_local_quality_it_overrides_spark_defaults_for_quality_bucket():
 
 def test_local_quality_it_targets_only_dedicated_bucket():
     compose_text = COMPOSE.read_text(encoding="utf-8")
-    assert "ecommerce-quality-it" in compose_text
+    assert "ecommerce-lakehouse-quality-it" in compose_text
     assert "ecommerce-data-lake" not in compose_text
 
 
@@ -61,6 +61,39 @@ def test_root_compose_passes_native_gold_and_nessie_env_with_safe_defaults():
     assert 'AIRFLOW_LOCAL_E2E_MODE:-' in root
     assert 'GOLD_DIMENSIONAL_ENABLED:-false' in root
     assert 'GOLD_DIMENSIONAL_WRITE_ENABLED:-false' in root
+
+
+def test_root_compose_declares_warehouse_and_silver_cutover_denials():
+    root = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    keys = (
+        "LAKEHOUSE_WRITE_ENABLED",
+        "WAREHOUSE_WRITE_ENABLED",
+        "CUSTOMERS_ICEBERG_CUTOVER_ENABLED",
+        "PRODUCTS_ICEBERG_CUTOVER_ENABLED",
+        "ORDERS_ICEBERG_CUTOVER_ENABLED",
+        "ORDER_ITEMS_ICEBERG_CUTOVER_ENABLED",
+        "PAYMENTS_ICEBERG_CUTOVER_ENABLED",
+        "SHIPMENTS_ICEBERG_CUTOVER_ENABLED",
+    )
+    for key in keys:
+        assert f'"${{{key}:-false}}"' in root
+
+
+def test_env_templates_explicitly_disable_warehouse_and_silver_cutover():
+    keys = (
+        "LAKEHOUSE_WRITE_ENABLED",
+        "WAREHOUSE_WRITE_ENABLED",
+        "CUSTOMERS_ICEBERG_CUTOVER_ENABLED",
+        "PRODUCTS_ICEBERG_CUTOVER_ENABLED",
+        "ORDERS_ICEBERG_CUTOVER_ENABLED",
+        "ORDER_ITEMS_ICEBERG_CUTOVER_ENABLED",
+        "PAYMENTS_ICEBERG_CUTOVER_ENABLED",
+        "SHIPMENTS_ICEBERG_CUTOVER_ENABLED",
+    )
+    for template in (ROOT / ".env.example", ROOT / ".env.quality-it.local.example"):
+        config = template.read_text(encoding="utf-8")
+        for key in keys:
+            assert f"{key}=false" in config
 
 
 def test_local_e2e_selects_parquet_for_all_silver_tables():
@@ -79,7 +112,10 @@ def test_local_e2e_env_selects_write_mode_for_all_tables(monkeypatch):
         sys.path.insert(0, dags_path)
     import pipeline_config
 
-    monkeypatch.setenv("BRONZE_BUCKET", "ecommerce-quality-it")
+    monkeypatch.setenv("BRONZE_BUCKET", "ecommerce-lakehouse-quality-it")
+    monkeypatch.setenv("LAKEHOUSE_STORAGE_ENV", "quality-it")
+    monkeypatch.setenv("QUALITY_IT_RUN_ID", "local-compose-test")
+    monkeypatch.setenv("QUALITY_IT_PREFIX", "quality-it/local-compose-test/")
     monkeypatch.setenv("AIRFLOW_LOCAL_E2E_MODE", "WRITE")
     monkeypatch.setenv("INGESTION_WRITE_ENABLED", "true")
     result = pipeline_config.validate_incremental_run_config({})
@@ -107,6 +143,7 @@ def test_write_selection_remains_fail_closed_outside_local_profile(monkeypatch):
     import pipeline_config
 
     monkeypatch.delenv("BRONZE_BUCKET", raising=False)
+    monkeypatch.delenv("LAKEHOUSE_STORAGE_ENV", raising=False)
     monkeypatch.delenv("AIRFLOW_LOCAL_E2E_MODE", raising=False)
     monkeypatch.delenv("INGESTION_WRITE_ENABLED", raising=False)
     result = pipeline_config.validate_incremental_run_config({})
@@ -121,7 +158,10 @@ def test_local_write_selection_still_requires_ingestion_write_flag(monkeypatch):
         sys.path.insert(0, dags_path)
     import pipeline_config
 
-    monkeypatch.setenv("BRONZE_BUCKET", "ecommerce-quality-it")
+    monkeypatch.setenv("BRONZE_BUCKET", "ecommerce-lakehouse-quality-it")
+    monkeypatch.setenv("LAKEHOUSE_STORAGE_ENV", "quality-it")
+    monkeypatch.setenv("QUALITY_IT_RUN_ID", "local-compose-test")
+    monkeypatch.setenv("QUALITY_IT_PREFIX", "quality-it/local-compose-test/")
     monkeypatch.setenv("AIRFLOW_LOCAL_E2E_MODE", "WRITE")
     monkeypatch.delenv("INGESTION_WRITE_ENABLED", raising=False)
     import pytest

@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 import psycopg2
 
 
-LOCAL_BUCKET = "ecommerce-quality-it"
+LOCAL_BUCKET = "ecommerce-lakehouse-quality-it"
 LOCAL_MODE = "WRITE"
 LOCAL_DB_HOSTS = frozenset({"postgres", "localhost", "127.0.0.1"})
 LOCAL_DB_NAME = "ecommerce_platform"
@@ -53,7 +53,7 @@ def fixture_ids(run_id=DEFAULT_RUN_ID):
 def validate_local_scope(environ=None):
     env = os.environ if environ is None else environ
     if env.get("BRONZE_BUCKET") != LOCAL_BUCKET:
-        raise RuntimeError("Refusing PostgreSQL seed outside ecommerce-quality-it")
+        raise RuntimeError("Refusing PostgreSQL seed outside ecommerce-lakehouse-quality-it")
     if env.get("AIRFLOW_LOCAL_E2E_MODE") != LOCAL_MODE:
         raise RuntimeError("Set AIRFLOW_LOCAL_E2E_MODE=WRITE for the local E2E seed")
     if env.get("INGESTION_WRITE_ENABLED", "").lower() != "true":

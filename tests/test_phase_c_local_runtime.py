@@ -3,7 +3,7 @@ from pyspark.sql import SparkSession
 
 from tests.run_phase_c_local_runtime import PhaseCLocalRuntimeError, run_phase_c_dry_run
 
-KWARGS = {"bucket": "ecommerce-quality-it", "endpoint": "http://localhost:19130/api/v2", "ref": "main", "schema_before": "a" * 64, "schema_after": "a" * 64}
+KWARGS = {"bucket": "ecommerce-lakehouse-quality-it", "endpoint": "http://localhost:19130/api/v2", "ref": "main", "schema_before": "a" * 64, "schema_after": "a" * 64}
 
 
 @pytest.fixture(scope="module")
@@ -37,7 +37,7 @@ def test_phase_c_spark_runner_detects_late_correction_with_new_lineage(spark):
     from tests.run_phase_c_local_runtime import run_phase_c_spark_dry_run
 
     result = run_phase_c_spark_dry_run(
-        spark, bucket="ecommerce-quality-it", endpoint="http://localhost:19130/api/v2", ref="main"
+        spark, bucket="ecommerce-lakehouse-quality-it", endpoint="http://localhost:19130/api/v2", ref="main"
     )
     assert result["status"] == "DRY_RUN"
     assert result["late_correction"] == "DETECTED"

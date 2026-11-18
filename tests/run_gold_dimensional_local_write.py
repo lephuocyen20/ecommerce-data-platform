@@ -1,6 +1,7 @@
 """Run local Gold dimensional WRITE against persisted local fixture lineage."""
 from __future__ import annotations
 import argparse, json, os, sys
+from datetime import datetime, timezone
 from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path: sys.path.insert(0, str(PROJECT_ROOT))
@@ -10,7 +11,7 @@ from common.bounded_e2e_scope import BoundedE2EScopeError, build_bounded_e2e_sco
 from gold.implementation.dimensional.writer import WRITE, run_dimensional_graph
 from gold.implementation.dimensional.contracts import WRITE_ORDER
 from gold.implementation.dimensional.lineage import validate_dimensional_lineage
-LOCAL_BUCKET = "ecommerce-quality-it"
+LOCAL_BUCKET = "ecommerce-lakehouse-quality-it"
 
 def inspect_local_graph(lineage_path: Path, bucket: str):
     """Read-only preflight for local lineage and expected seven outputs."""
@@ -35,7 +36,7 @@ def run_local_write(lineage_path: Path, bucket: str, *, dim_date_start: str, dim
     spark = SparkSession.builder.appName("GoldDimensionalLocalWrite").getOrCreate()
     try:
         configure_s3a(spark)
-        return run_dimensional_graph(spark, create_minio_client(), bucket, lineage, dim_date_start=dim_date_start, dim_date_end=dim_date_end, mode=WRITE, scope=scope)
+        return run_dimensional_graph(spark, create_minio_client(), bucket, lineage, dim_date_start=dim_date_start, dim_date_end=dim_date_end, mode=WRITE, scope=scope, captured_at=datetime.now(timezone.utc).isoformat())
     finally: spark.stop()
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__); p.add_argument("--bucket", default=LOCAL_BUCKET); p.add_argument("--lineage", type=Path, default=Path("/tmp/gold-local-lineage.json")); p.add_argument("--dim-date-start", default="2026-01-01"); p.add_argument("--dim-date-end", default="2026-01-07"); a = p.parse_args(argv)

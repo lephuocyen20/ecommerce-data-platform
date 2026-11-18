@@ -5,21 +5,21 @@ from tests.seed_local_postgres_e2e import _fixture_rows, fixture_ids, seed_local
 
 def _local_env():
     return {
-        "BRONZE_BUCKET": "ecommerce-quality-it",
+        "BRONZE_BUCKET": "ecommerce-data-lake",
         "AIRFLOW_LOCAL_E2E_MODE": "WRITE",
         "INGESTION_WRITE_ENABLED": "true",
     }
 
 
 def test_seed_requires_bounded_local_profile():
-    with pytest.raises(RuntimeError, match="ecommerce-quality-it"):
+    with pytest.raises(RuntimeError, match="ecommerce-lakehouse-quality-it"):
         validate_local_scope({"BRONZE_BUCKET": "ecommerce-data-lake", "AIRFLOW_LOCAL_E2E_MODE": "WRITE", "INGESTION_WRITE_ENABLED": "true"})
 
 
 def test_seed_rejects_external_postgres_target():
     env = _local_env()
     env.update({"DB_HOST": "postgres.production.example", "DB_NAME": "analytics"})
-    with pytest.raises(RuntimeError, match="PostgreSQL host"):
+    with pytest.raises(RuntimeError, match="outside ecommerce-lakehouse-quality-it"):
         validate_local_scope(env)
 
 

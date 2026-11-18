@@ -39,10 +39,13 @@ def test_scope_rejects_escape_key():
         scope.key("gold/../outside.json")
 
 
-def test_scope_prefixes_silver_incremental_paths_without_changing_local_default():
+def test_scope_prefixes_silver_incremental_paths_without_changing_local_default(monkeypatch):
+    # Keep the local-default assertion independent of a BRONZE_BUCKET left by
+    # an earlier test importing runtime configuration from .env.
+    monkeypatch.setenv("BRONZE_BUCKET", "ecommerce-lakehouse-prod")
     scope = build_bounded_e2e_scope(env())
     batch_id = "a" * 32
     bounded = silver_incremental_batch_paths("orders", batch_id, scope=scope)
-    local = silver_incremental_batch_paths("orders", batch_id)
+    local = silver_incremental_batch_paths("orders", batch_id, environ={})
     assert bounded["manifest_key"] == f"{scope.prefix}silver_incremental/orders/batch_id={batch_id}/_BATCH_METADATA.json"
     assert local["manifest_key"] == f"silver_incremental/orders/batch_id={batch_id}/_BATCH_METADATA.json"

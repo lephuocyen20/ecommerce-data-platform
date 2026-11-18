@@ -19,7 +19,7 @@ def test_demo_contract_declares_six_silver_and_seven_gold_outputs():
 
 def test_demo_is_contract_only_and_fail_closed_on_scope_or_write_flags():
     assert "runtime_invoked = $false" in SCRIPT
-    assert "ecommerce-quality-it" in SCRIPT
+    assert "ecommerce-lakehouse-quality-it" in SCRIPT
     assert "GOLD_DIMENSIONAL_WRITE_ENABLED" in SCRIPT
     assert "NESSIE_URI" in SCRIPT
     assert "quality-it/$runId/" in SCRIPT
@@ -39,7 +39,7 @@ def _manifest(tmp_path, kind, tables, *, mode="DRY_RUN", can_write=False):
 def test_demo_validates_existing_manifest_paths_and_content(tmp_path):
     silver = _manifest(tmp_path, "silver", ["customers", "products", "orders", "order_items", "payments", "shipments"])
     gold = _manifest(tmp_path, "gold", ["dim_date", "dim_customer", "dim_product", "fact_orders", "fact_order_items", "fact_payments", "fact_shipments"])
-    env = {**__import__("os").environ, "QUALITY_IT_RUN_ID": "qa-run", "QUALITY_IT_BUCKET": "ecommerce-quality-it", "QUALITY_IT_PREFIX": "quality-it/qa-run/", "NESSIE_URI": "http://localhost:19120/api/v2", "NESSIE_REF": "qa_ref", "GOLD_RUN_MODE": "DRY_RUN", "GOLD_DIMENSIONAL_WRITE_ENABLED": "false"}
+    env = {**__import__("os").environ, "QUALITY_IT_RUN_ID": "qa-run", "QUALITY_IT_BUCKET": "ecommerce-lakehouse-quality-it", "QUALITY_IT_PREFIX": "quality-it/qa-run/", "NESSIE_URI": "http://localhost:19120/api/v2", "NESSIE_REF": "qa_ref", "GOLD_RUN_MODE": "DRY_RUN", "GOLD_DIMENSIONAL_WRITE_ENABLED": "false"}
     result = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/run_local_e2e_demo.ps1", "-Mode", "verify", "-SilverArtifactManifest", str(silver), "-GoldArtifactManifest", str(gold)], capture_output=True, text=True, env=env)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["manifest_validation"] == "PASS"
@@ -48,7 +48,7 @@ def test_demo_validates_existing_manifest_paths_and_content(tmp_path):
 def test_demo_rejects_incomplete_manifest(tmp_path):
     silver = _manifest(tmp_path, "silver", ["customers"])
     gold = _manifest(tmp_path, "gold", ["dim_date", "dim_customer", "dim_product", "fact_orders", "fact_order_items", "fact_payments", "fact_shipments"])
-    env = {**__import__("os").environ, "QUALITY_IT_RUN_ID": "qa-run", "QUALITY_IT_BUCKET": "ecommerce-quality-it", "QUALITY_IT_PREFIX": "quality-it/qa-run/", "NESSIE_URI": "http://localhost:19120/api/v2", "NESSIE_REF": "qa_ref", "GOLD_RUN_MODE": "DRY_RUN", "GOLD_DIMENSIONAL_WRITE_ENABLED": "false"}
+    env = {**__import__("os").environ, "QUALITY_IT_RUN_ID": "qa-run", "QUALITY_IT_BUCKET": "ecommerce-lakehouse-quality-it", "QUALITY_IT_PREFIX": "quality-it/qa-run/", "NESSIE_URI": "http://localhost:19120/api/v2", "NESSIE_REF": "qa_ref", "GOLD_RUN_MODE": "DRY_RUN", "GOLD_DIMENSIONAL_WRITE_ENABLED": "false"}
     result = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/run_local_e2e_demo.ps1", "-Mode", "verify", "-SilverArtifactManifest", str(silver), "-GoldArtifactManifest", str(gold)], capture_output=True, text=True, env=env)
     assert result.returncode != 0
     assert "incomplete or arbitrary" in result.stderr or "exactly 6" in result.stderr
@@ -58,7 +58,7 @@ def test_demo_rejects_incomplete_manifest(tmp_path):
 def test_demo_requires_exact_non_mutating_flags(tmp_path, name, value):
     silver = _manifest(tmp_path, "silver", ["customers", "products", "orders", "order_items", "payments", "shipments"])
     gold = _manifest(tmp_path, "gold", ["dim_date", "dim_customer", "dim_product", "fact_orders", "fact_order_items", "fact_payments", "fact_shipments"])
-    env = {**__import__("os").environ, "QUALITY_IT_RUN_ID": "qa-run", "QUALITY_IT_BUCKET": "ecommerce-quality-it", "QUALITY_IT_PREFIX": "quality-it/qa-run/", "NESSIE_URI": "http://localhost:19120/api/v2", "NESSIE_REF": "qa_ref", "GOLD_RUN_MODE": "DRY_RUN", "GOLD_DIMENSIONAL_WRITE_ENABLED": "false"}
+    env = {**__import__("os").environ, "QUALITY_IT_RUN_ID": "qa-run", "QUALITY_IT_BUCKET": "ecommerce-lakehouse-quality-it", "QUALITY_IT_PREFIX": "quality-it/qa-run/", "NESSIE_URI": "http://localhost:19120/api/v2", "NESSIE_REF": "qa_ref", "GOLD_RUN_MODE": "DRY_RUN", "GOLD_DIMENSIONAL_WRITE_ENABLED": "false"}
     if value is None:
         env.pop(name, None)
     else:
@@ -73,7 +73,7 @@ def test_demo_rejects_empty_or_inconsistent_manifest_evidence(tmp_path):
     payload = json.loads(silver.read_text(encoding="utf-8"))
     payload["silver_inputs"][0]["evidence"] = {}
     silver.write_text(json.dumps(payload), encoding="utf-8")
-    env = {**__import__("os").environ, "QUALITY_IT_RUN_ID": "qa-run", "QUALITY_IT_BUCKET": "ecommerce-quality-it", "QUALITY_IT_PREFIX": "quality-it/qa-run/", "NESSIE_URI": "http://localhost:19120/api/v2", "NESSIE_REF": "qa_ref", "GOLD_RUN_MODE": "DRY_RUN", "GOLD_DIMENSIONAL_WRITE_ENABLED": "false"}
+    env = {**__import__("os").environ, "QUALITY_IT_RUN_ID": "qa-run", "QUALITY_IT_BUCKET": "ecommerce-lakehouse-quality-it", "QUALITY_IT_PREFIX": "quality-it/qa-run/", "NESSIE_URI": "http://localhost:19120/api/v2", "NESSIE_REF": "qa_ref", "GOLD_RUN_MODE": "DRY_RUN", "GOLD_DIMENSIONAL_WRITE_ENABLED": "false"}
     result = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/run_local_e2e_demo.ps1", "-Mode", "verify", "-SilverArtifactManifest", str(silver), "-GoldArtifactManifest", str(gold)], capture_output=True, text=True, env=env)
     assert result.returncode != 0
 

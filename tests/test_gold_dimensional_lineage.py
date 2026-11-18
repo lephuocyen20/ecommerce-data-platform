@@ -368,6 +368,25 @@ def test_parquet_lineage_source_contract_does_not_require_snapshot_id():
     assert metadata["sources"]["orders"]["delete_count"] == 0
 
 
+def test_parquet_lineage_rejects_extra_nested_fields():
+    artifacts = {
+        table: build_parquet_lineage_artifact(
+            table=table,
+            bucket="ecommerce-data-lake",
+            manifest_key=f"quality-it/run-20261111-gold-01/silver_incremental/{table}/manifest.json",
+            data_prefix=f"quality-it/run-20261111-gold-01/silver_incremental/{table}/runs/",
+            manifest_identity=f"{index:064x}",
+            batch_id=f"{index:032x}",
+            row_count=1,
+        )
+        for index, table in enumerate(DIMENSIONAL_SOURCE_TABLES, start=1)
+    }
+    artifacts["customers"]["parquet_lineage"]["status"] = "PASS"
+
+    with pytest.raises(DimensionalLineageError, match="Invalid Parquet lineage fields for customers"):
+        build_dimensional_lineage_from_artifacts(artifacts)
+
+
 def test_dimensional_lineage_rejects_physical_delete_policy():
     lineage = dimensional_lineage()
     lineage["source_contract"] = {"delete": {"physical_delete": True}}

@@ -14,7 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from gold.implementation.dimensional.contracts import DIMENSIONAL_SOURCE_TABLES
 from gold.implementation.dimensional.manifest import build_graph_manifest
 
-LOCAL_BUCKET = "ecommerce-quality-it"
+LOCAL_BUCKET = "ecommerce-lakehouse-quality-it"
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "nessie", "quality-it-nessie", "host.docker.internal"}
 
 
@@ -24,7 +24,7 @@ class PhaseCLocalRuntimeError(ValueError):
 
 def validate_local_scope(bucket, endpoint, ref):
     if bucket != LOCAL_BUCKET:
-        raise PhaseCLocalRuntimeError("Phase C runner requires ecommerce-quality-it bucket")
+        raise PhaseCLocalRuntimeError("Phase C runner requires ecommerce-lakehouse-quality-it bucket")
     parsed = urlparse(endpoint or "")
     if parsed.scheme not in {"http", "https"} or parsed.hostname not in LOCAL_HOSTS or not parsed.path.endswith("/api/v2"):
         raise PhaseCLocalRuntimeError("Phase C runner requires a local quality-it Nessie endpoint")

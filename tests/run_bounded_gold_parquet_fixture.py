@@ -208,6 +208,7 @@ def create_fixture(scope, *, lineage_output, artifacts_output):
                 manifest_identity=manifest_identity,
                 batch_id=paths["batch_id"],
                 row_count=manifest["silver_row_count"],
+                legacy_coverage_compatibility=True,
             )
 
         lineage = build_dimensional_lineage_from_artifacts(artifacts, scope=scope)

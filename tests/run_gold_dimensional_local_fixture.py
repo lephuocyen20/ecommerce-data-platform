@@ -1,6 +1,6 @@
 """Seed a local-only Silver fixture and execute Gold dimensional DRY_RUN.
 
-This runner is intentionally bounded to the ``ecommerce-quality-it`` bucket.
+This runner is intentionally bounded to the ``ecommerce-lakehouse-quality-it`` bucket.
 It never reads production evidence and refuses a production-looking bucket.
 Run inside the local quality-it Spark container after the stack is healthy.
 """
@@ -33,7 +33,7 @@ from lakehouse.models.spec import SPECS
 from tests.run_gold_dimensional_iceberg_integration import dry_run_harness
 
 
-LOCAL_BUCKET = "ecommerce-quality-it"
+LOCAL_BUCKET = "ecommerce-lakehouse-quality-it"
 TABLES = ("customers", "products", "orders", "order_items", "payments", "shipments")
 CATALOG = "lakehouse"
 NAMESPACE = "silver"

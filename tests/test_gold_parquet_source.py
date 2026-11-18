@@ -3,6 +3,8 @@ import json
 
 import pytest
 
+from common.manifest import canonical_manifest_identity
+
 from gold.implementation.dimensional import reader
 from gold.implementation.dimensional.contracts import DIMENSIONAL_SOURCE_TABLES
 from gold.implementation.dimensional.lineage import (
@@ -42,15 +44,16 @@ def _lineage_and_manifests():
         batch = f"{index:032x}"
         prefix = f"silver_incremental/{table}/batch_id={batch}/runs/run/"
         manifest = _manifest(table, batch, prefix)
-        identity = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        identity = canonical_manifest_identity(manifest)
         artifacts[table] = build_parquet_lineage_artifact(
             table=table,
-            bucket="ecommerce-quality-it",
+            bucket="ecommerce-lakehouse-quality-it",
             manifest_key=f"silver_incremental/{table}/batch_id={batch}/_BATCH_METADATA.json",
             data_prefix=prefix,
             manifest_identity=identity,
             batch_id=batch,
             row_count=1,
+            legacy_coverage_compatibility=True,
         )
         manifests[table] = manifest
     return build_dimensional_lineage_from_artifacts(artifacts), manifests
@@ -89,9 +92,63 @@ def test_reader_revalidates_manifest_inventory_before_reading(monkeypatch):
         read = Reader()
 
     monkeypatch.setattr(reader, "discover_parquet_objects", lambda *args, **kwargs: [{"object_key": args[2] + "part-00000.parquet", "size": 10, "etag": "etag"}])
-    sources = reader.read_dimensional_sources(Spark(), Client(), "ecommerce-quality-it", lineage)
+    sources = reader.read_dimensional_sources(Spark(), Client(), "ecommerce-lakehouse-quality-it", lineage)
     assert set(sources) == set(DIMENSIONAL_SOURCE_TABLES)
     assert all(frame.columns == SPECS[table].columns for table, frame in sources.items())
+
+
+def test_reader_uses_manifest_parquet_paths_instead_of_prefix(monkeypatch):
+    lineage, manifests = _lineage_and_manifests()
+    parquet_calls = []
+
+    class Response:
+        def __init__(self, value): self.value = value
+        def read(self): return json.dumps(self.value).encode()
+        def close(self): pass
+        def release_conn(self): pass
+
+    class Client:
+        def get_object(self, bucket, key):
+            table = key.split("/")[1]
+            return Response(manifests[table])
+
+    class Frame:
+        def __init__(self, columns): self.columns = tuple(columns)
+        def select(self, *columns): return Frame(columns)
+        def unionByName(self, other): return self
+        def dropDuplicates(self, _columns): return self
+
+    class Spark:
+        class Reader:
+            def parquet(self, *paths):
+                parquet_calls.append(paths)
+                table = paths[0].split("/")[4]
+                return Frame(SPECS[table].columns)
+        read = Reader()
+
+    monkeypatch.setattr(
+        reader,
+        "discover_parquet_objects",
+        lambda *args, **kwargs: [{
+            "object_key": args[2] + "part-00000.parquet",
+            "size": 10,
+            "etag": "etag",
+        }],
+    )
+
+    sources = reader.read_dimensional_sources(Spark(), Client(), "ecommerce-lakehouse-quality-it", lineage)
+
+    assert set(sources) == set(DIMENSIONAL_SOURCE_TABLES)
+    assert all(paths and all(path.endswith(".parquet") for path in paths) for paths in parquet_calls)
+    expected_calls = [
+        (f"s3a://ecommerce-lakehouse-quality-it/{manifests[table]['parquet_objects'][0]['object_key']}",)
+        for table in DIMENSIONAL_SOURCE_TABLES
+    ]
+    assert parquet_calls == expected_calls
+    assert all(
+        paths != (f"s3a://ecommerce-lakehouse-quality-it/{manifests[table]['data_prefix']}",)
+        for table, paths in zip(DIMENSIONAL_SOURCE_TABLES, parquet_calls)
+    )
 
 
 def test_bounded_scope_rejects_historical_manifest_outside_prefix():

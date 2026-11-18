@@ -64,7 +64,7 @@ def _writer_result(status="DRY_RUN"):
 def test_certification_report_is_complete_and_dry_run_cannot_write():
     report = build_certification_report(
         run_id="run-1", code_identity="git-1", config_identity="cfg-1", lineage_identity="lineage-1",
-        bucket="ecommerce-quality-it", prefix=None, ref="main", writer_result=_writer_result(),
+        bucket="ecommerce-lakehouse-quality-it", prefix=None, ref="main", writer_result=_writer_result(),
     )
     assert report["graph_manifest_complete"] is False
     assert report["can_write"] is False
@@ -80,7 +80,7 @@ def test_certification_report_classifies_partial_without_cleanup_or_rollback():
     result["quality"] = {}
     report = build_certification_report(
         run_id="run-1", code_identity="git-1", config_identity="cfg-1", lineage_identity="lineage-1",
-        bucket="ecommerce-quality-it", prefix=None, ref="main", writer_result=result,
+        bucket="ecommerce-lakehouse-quality-it", prefix=None, ref="main", writer_result=result,
     )
     assert report["recovery_classification"] == "PARTIAL_REQUIRES_RECONCILIATION"
     assert report["graph_manifest_complete"] is False
@@ -100,7 +100,7 @@ def test_already_published_reads_completed_graph_and_table_manifests(monkeypatch
     monkeypatch.setattr("gold.implementation.dimensional.verification.read_table_manifests", lambda *_: manifests)
     report = build_certification_report(
         run_id="run-1", code_identity="git-1", config_identity="cfg-1", lineage_identity="lineage-1",
-        bucket="ecommerce-quality-it", prefix=None, ref="main",
+        bucket="ecommerce-lakehouse-quality-it", prefix=None, ref="main",
         writer_result={"status": "ALREADY_PUBLISHED", "mode": "WRITE", "graph": graph, "tables": []},
         client=object(),
     )
@@ -118,7 +118,7 @@ def test_already_published_rejects_graph_table_identity_mismatch(monkeypatch):
     with pytest.raises(ValueError, match="manifest mismatch"):
         build_certification_report(
             run_id="run-1", code_identity="git-1", config_identity="cfg-1", lineage_identity="lineage-1",
-            bucket="ecommerce-quality-it", prefix=None, ref="main",
+        bucket="ecommerce-lakehouse-quality-it", prefix=None, ref="main",
             writer_result={"status": "ALREADY_PUBLISHED", "mode": "WRITE", "graph": graph, "tables": []},
             client=object(),
         )
@@ -129,7 +129,7 @@ def test_published_without_snapshot_file_row_readback_is_not_certified():
     result["mode"] = "WRITE"
     report = build_certification_report(
         run_id="run-1", code_identity="git-1", config_identity="cfg-1", lineage_identity="lineage-1",
-        bucket="ecommerce-quality-it", prefix=None, ref="main", writer_result=result,
+        bucket="ecommerce-lakehouse-quality-it", prefix=None, ref="main", writer_result=result,
     )
     assert report["graph_manifest_complete"] is True
     assert report["certified"] is False
