@@ -1,0 +1,48 @@
+{
+  "kind": "gold_continuous_write_certification",
+  "captured_on": "2026-11-17",
+  "dag_id": "ecommerce_incremental_ingestion",
+  "run_id": "manual__gold_v2_silver_recovery_current_20261117",
+  "dag_run_state": "success",
+  "mode": "WRITE",
+  "bucket": "ecommerce-lakehouse-prod",
+  "nessie_ref": "gold_prod_current",
+  "task_states": {
+    "gold_dimensional_write": "success",
+    "publish_gold_to_active": "success",
+    "confirmations": {
+      "confirm_gold_dimensional_dim_date": "success",
+      "confirm_gold_dimensional_dim_customer": "success",
+      "confirm_gold_dimensional_dim_product": "success",
+      "confirm_gold_dimensional_fact_orders": "success",
+      "confirm_gold_dimensional_fact_order_items": "success",
+      "confirm_gold_dimensional_fact_payments": "success",
+      "confirm_gold_dimensional_fact_shipments": "success"
+    }
+  },
+  "writer": {
+    "status": "PUBLISHED",
+    "verification_status": "VERIFIED",
+    "graph_identity": "55bd9d6c93e0d3d8f64e37dd93d064a21f989a5389a4abe49841611e02c44828",
+    "lineage_identity": "2873a0b48c135082f90909e4bee6d7ecb37d572873962d4fdcea4f3768dd257c",
+    "readback_complete": true,
+    "tables": [
+      {"table": "dim_date", "snapshot_id": 3026990709042630215, "row_count": 5844, "file_count": 1, "file_bytes": 22053, "readback_status": "PASS"},
+      {"table": "dim_customer", "snapshot_id": 6798381068097339243, "row_count": 3, "file_count": 2, "file_bytes": 4551, "readback_status": "PASS"},
+      {"table": "dim_product", "snapshot_id": 5631853196012256440, "row_count": 3, "file_count": 2, "file_bytes": 4634, "readback_status": "PASS"},
+      {"table": "fact_orders", "snapshot_id": 6870016853836544441, "row_count": 2, "file_count": 2, "file_bytes": 6176, "readback_status": "PASS"},
+      {"table": "fact_order_items", "snapshot_id": 4447131061115665036, "row_count": 2000, "file_count": 2, "file_bytes": 41159, "readback_status": "PASS"},
+      {"table": "fact_payments", "snapshot_id": 2915024913395675005, "row_count": 2, "file_count": 2, "file_bytes": 3966, "readback_status": "PASS"},
+      {"table": "fact_shipments", "snapshot_id": 3212316299086449201, "row_count": 2, "file_count": 2, "file_bytes": 3263, "readback_status": "PASS"}
+    ]
+  },
+  "safety": {
+    "cleanup": false,
+    "rollback": false,
+    "checkpoint_reset": false,
+    "watermark_reset": false,
+    "iceberg_cutover": false,
+    "bi_active_publish_apply": false,
+    "write_flags_restored_disabled": true
+  }
+}

@@ -128,7 +128,7 @@ For native Gold local-only work, use the dedicated environment file
 `.env.quality-it.local` (copied from the committed example) with
 `docker compose --env-file .env.quality-it.local config` and, only when the
 user has approved a local stack run, recreate the Airflow containers so their
-environment receives `ecommerce-quality-it` and the explicit date bounds. Do
+environment receives `ecommerce-lakehouse-quality-it` and the explicit date bounds. Do
 not copy secrets into the example or point this configuration at production.
 The approved local E2E profile explicitly sets `INGESTION_WRITE_ENABLED=true`
 for Silver Parquet artifact production while keeping
@@ -138,7 +138,7 @@ It sets all six `*_SILVER_SOURCE=parquet` values. Iceberg/Nessie is initialized
 only by the Gold dimensional writer; the legacy Silver migration branch is not
 part of the main DAG. The legacy aggregate Gold write remains disabled.
 `AIRFLOW_LOCAL_E2E_MODE=WRITE` supplies the explicit six-table local run
-configuration only when `BRONZE_BUCKET=ecommerce-quality-it`; normal runs still
+configuration only when `BRONZE_BUCKET=ecommerce-lakehouse-quality-it`; normal runs still
 require explicit Airflow `dag_run.conf`.
 
 Before the approved local E2E run, seed one deterministic, FK-valid delta in
@@ -146,7 +146,7 @@ each PostgreSQL source table (the command is idempotent and never deletes
 data):
 
 ```powershell
-$env:BRONZE_BUCKET="ecommerce-quality-it"
+$env:BRONZE_BUCKET="ecommerce-lakehouse-quality-it"
 $env:AIRFLOW_LOCAL_E2E_MODE="WRITE"
 $env:INGESTION_WRITE_ENABLED="true"
 $env:QUALITY_IT_RUN_ID="r5-local-a"

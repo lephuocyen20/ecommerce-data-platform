@@ -1,0 +1,51 @@
+{
+  "kind": "gold_production_write_runtime_evidence",
+  "captured_on": "2026-11-17",
+  "dag_id": "ecommerce_incremental_ingestion",
+  "run_id": "manual__gold_v2_silver_recovery_full_20261117",
+  "dag_run_state": "success",
+  "mode": "WRITE",
+  "bucket": "ecommerce-lakehouse-prod",
+  "nessie_ref": "gold_prod_current",
+  "task_states": {
+    "dimensional_parquet_artifact_customers": "success",
+    "dimensional_parquet_artifact_products": "success",
+    "dimensional_parquet_artifact_orders": "success",
+    "dimensional_parquet_artifact_order_items": "success",
+    "dimensional_parquet_artifact_payments": "success",
+    "dimensional_parquet_artifact_shipments": "success",
+    "gold_dimensional_write": "success",
+    "publish_gold_to_active": "success",
+    "confirm_gold_dimensional_dim_date": "success",
+    "confirm_gold_dimensional_dim_customer": "success",
+    "confirm_gold_dimensional_dim_product": "success",
+    "confirm_gold_dimensional_fact_orders": "success",
+    "confirm_gold_dimensional_fact_order_items": "success",
+    "confirm_gold_dimensional_fact_payments": "success",
+    "confirm_gold_dimensional_fact_shipments": "success"
+  },
+  "writer": {
+    "status": "PUBLISHED",
+    "verification_status": "VERIFIED",
+    "graph_identity": "3acdc36a21b6c5c7cac8b933354d8cdf5f20d131b384a55227dc67fba3d12672",
+    "lineage_identity": "116e5e1b83bc8e606b77ebaf7d9f81b2bc6d8e8c4bae9209520b0c21c383385c",
+    "readback_complete": true,
+    "tables": [
+      {"table": "dim_date", "snapshot_id": 8300005057622653772, "row_count": 5844, "file_count": 1, "file_bytes": 36985, "readback_status": "PASS"},
+      {"table": "dim_customer", "snapshot_id": 786037195758037652, "row_count": 2, "file_count": 2, "file_bytes": 3808, "readback_status": "PASS"},
+      {"table": "dim_product", "snapshot_id": 8905819289329486792, "row_count": 2, "file_count": 2, "file_bytes": 4117, "readback_status": "PASS"},
+      {"table": "fact_orders", "snapshot_id": 1438339384355442125, "row_count": 1, "file_count": 1, "file_bytes": 3088, "readback_status": "PASS"},
+      {"table": "fact_order_items", "snapshot_id": 8586307239778102043, "row_count": 1000, "file_count": 1, "file_bytes": 20637, "readback_status": "PASS"},
+      {"table": "fact_payments", "snapshot_id": 580276847080416209, "row_count": 1, "file_count": 1, "file_bytes": 1983, "readback_status": "PASS"},
+      {"table": "fact_shipments", "snapshot_id": 2619881162295006776, "row_count": 1, "file_count": 1, "file_bytes": 1631, "readback_status": "PASS"}
+    ]
+  },
+  "safety": {
+    "cleanup": false,
+    "rollback": false,
+    "checkpoint_reset": false,
+    "watermark_reset": false,
+    "cutover_enabled": false,
+    "write_flags_restored_disabled": true
+  }
+}

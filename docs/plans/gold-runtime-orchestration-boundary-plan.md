@@ -125,6 +125,39 @@ the runtime diff changes or fresh container evidence is required.
 QA is complete for the scoped implementation and documentation re-review.
 Do not mark runtime certification or Gold WRITE cutover complete.
 
+## Follow-up safety fix — Gold production approval propagation (2026-11-16)
+
+Approved scope: propagate `PRODUCTION_LAKEHOUSE_WRITE_APPROVED` from the
+Airflow environment into `GoldDimensionalDockerOperator`'s Spark container
+environment, preserving an empty default and the existing Spark-side runtime
+guard. No `.env` file, DAG trigger, external service, storage object,
+watermark, checkpoint, or Iceberg cutover was changed.
+
+Files: `airflow/dags/pipeline_operators.py` and
+`tests/test_gold_orchestration.py`.
+
+Acceptance criteria: an explicitly set approval value reaches only the Gold
+Spark task; when absent, the propagated value is empty/unapproved; focused
+tests, compileall, and `git diff --check` pass. Independent QA verdict and
+final delivery handoff remain pending for this follow-up.
+
+### Independent QA result (2026-11-16)
+
+- Reviewed the actual working-tree diff in `airflow/dags/pipeline_operators.py`,
+  `tests/test_gold_orchestration.py`, and `tests/test_airflow_parse_imports.py`.
+- Verified that the Gold operator forwards only the explicit
+  `PRODUCTION_LAKEHOUSE_WRITE_APPROVED` value and uses an empty default; the
+  generic Spark factory does not implicitly forward this approval.
+- Verified the Spark-side production WRITE guard remains unchanged and runs
+  before Spark/MinIO client creation.
+- Verification: focused suite **50 passed**, lakehouse safety guards **8
+  passed**, `compileall` **PASS**, AST parse **PASS**, and `git diff --check`
+  **PASS**. No DAG trigger or external write occurred.
+- Independent QA verdict: **PASS WITH WARNINGS**. The working tree contains
+  substantial unrelated changes in the same files, so clean isolated-diff
+  attribution remains a regression risk. Production WRITE and cutover remain
+  unverified and require separate approval.
+
 ## Follow-up read-only quality-it evidence
 
 - Dedicated `ecommerce-quality-it` Nessie catalog was queried without writes.
@@ -288,3 +321,45 @@ Do not mark runtime certification or Gold WRITE cutover complete.
   compaction, cutover or production write was performed.
 - Status: **PASS WITH WARNINGS — bounded local recovery is verified; this is
   not production certification or consumer cutover approval.**
+
+## Full-suite stabilization — certification report fixture isolation (2026-11-18)
+
+- Approved scope: fix the test-only `_patch_runner_runtime` helper so its
+  immutable `runner-test` identity is propagated to both `QUALITY_IT_RUN_ID`
+  and the runtime certification input `LAKEHOUSE_E2E_RUN_ID`.
+- Production behavior, external services, checkpoints, and storage were not
+  changed or accessed.
+- Acceptance evidence: targeted `tests/test_gold_orchestration.py` passes; the
+  diff contains no production changes; and `git diff --check` passes.
+- QA handoff: independently review this fixture-isolation change against the
+  approved scope. The next step is to continue remaining full-suite
+  stabilization failures; no runtime certification gate is advanced.
+
+### Independent QA verdict — fixture isolation (2026-11-18)
+
+- **PASS** for the approved test-only scope.
+- Evidence: `.venv\Scripts\python.exe -m pytest -q
+  tests/test_gold_orchestration.py` => **43 passed in 0.38s**;
+  `git diff --check` => exit 0, with only pre-existing LF/CRLF conversion
+  warnings.
+- Review confirmed the helper sets the same immutable `runner-test` value for
+  `QUALITY_IT_RUN_ID` and `LAKEHOUSE_E2E_RUN_ID`; no production runtime code,
+  database, object storage, Nessie, checkpoint, or `.env` was touched.
+- Next step: continue the remaining full-suite stabilization work; this
+  targeted QA result does not certify an external runtime or advance cutover.
+
+## Full-suite stabilization — local quality-it environment fixture isolation (2026-11-18)
+
+- Approved scope: update only `tests/test_quality_it_local_compose.py` so the
+  WRITE-mode test explicitly selects the `quality-it` storage layout and its
+  immutable test prefix, preventing host `.env` production values from leaking
+  into the test.
+- Changed test values: `LAKEHOUSE_STORAGE_ENV=quality-it`,
+  `QUALITY_IT_RUN_ID=local-compose-test`, and
+  `QUALITY_IT_PREFIX=quality-it/local-compose-test/`.
+- Production code, external services, databases, object storage, Nessie,
+  checkpoints, manifests, and Iceberg cutover were not changed or accessed.
+- Verification: targeted quality-it and storage tests **32 passed**; `git diff
+  --check` passed with only pre-existing LF/CRLF conversion warnings.
+- QA handoff: independently review the exact test-only hunk against this
+  scope. No runtime certification gate or cutover status is advanced.

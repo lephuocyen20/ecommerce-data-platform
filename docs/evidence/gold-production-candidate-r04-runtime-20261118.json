@@ -1,0 +1,22 @@
+{
+  "status": "VERIFIED",
+  "candidate_ref": "gold_prod_candidate_v2_cert_20261118_r04",
+  "target_namespace": "gold_candidate_v2_cert_20261118_r04",
+  "stable_ref": "gold_prod_current",
+  "stable_ref_hash": "a4274ec5b703fc37a34ecb8efab17931773aa82987e37ca324a7c798cbfb59e7",
+  "candidate_ref_hash": "a94321570216b4cfae1e81306400c063bccdb82177242722f2c165289569c6a5",
+  "graph_identity": "d676b32f01497e88fd30d48e4641f9f40f9f25745fa7b944074a9bcfbc4a37c4",
+  "tables": {
+    "dim_customer": {"snapshot_id": 233863881850463017, "file_count": 2, "file_bytes": 3857, "row_count": 2, "readback_status": "PASS"},
+    "dim_date": {"snapshot_id": 3697247144145409539, "file_count": 1, "file_bytes": 36985, "row_count": 5844, "readback_status": "PASS"},
+    "dim_product": {"snapshot_id": 5467322766644052797, "file_count": 2, "file_bytes": 4102, "row_count": 2, "readback_status": "PASS"},
+    "fact_order_items": {"snapshot_id": 8125939880043643554, "file_count": 1, "file_bytes": 20522, "row_count": 1000, "readback_status": "PASS"},
+    "fact_orders": {"snapshot_id": 1070118966172443707, "file_count": 1, "file_bytes": 3088, "row_count": 1, "readback_status": "PASS"},
+    "fact_payments": {"snapshot_id": 2366669709642159527, "file_count": 1, "file_bytes": 1983, "row_count": 1, "readback_status": "PASS"},
+    "fact_shipments": {"snapshot_id": 3392804119737188097, "file_count": 1, "file_bytes": 1632, "row_count": 1, "readback_status": "PASS"}
+  },
+  "published": false,
+  "cutover": false,
+  "cleanup": false,
+  "verification": "Independent MinIO/Nessie/Spark read-only verification"
+}

@@ -1,0 +1,26 @@
+{
+  "kind": "gold_candidate_v2_runtime_evidence",
+  "captured_on": "2026-11-17",
+  "source_silver_run": "production_silver_v2_cert_20261117",
+  "candidate_ref": "gold_prod_candidate_v2_cert_20261117",
+  "candidate_namespace": "gold_candidate_v2_cert_20261117",
+  "candidate_ref_type": "BRANCH",
+  "candidate_ref_hash": "a4274ec5b703fc37a34ecb8efab17931773aa82987e37ca324a7c798cbfb59e7",
+  "stable_ref": "gold_prod_current",
+  "stable_ref_advanced": false,
+  "published": false,
+  "cutover": false,
+  "cleanup": false,
+  "graph_identity": "0859025fd0fec3226fa75c2e1cb78cd46d3a9286d1f3a985ba1a85df197d6641",
+  "status": "VERIFIED",
+  "tables": [
+    {"table":"dim_customer","manifest_key":"gold/dimensional/tables/v1/0859025fd0fec3226fa75c2e1cb78cd46d3a9286d1f3a985ba1a85df197d6641/dim_customer.json","snapshot_id":1717599083777412105,"row_count":2,"file_count":2,"file_bytes":3801,"manifest_identity":"0ec6294c558ff9467edcef7e9369f0b02f7f35d449ea4d5b3ae74929db26d870","schema_identity":"3a400ad160d3b2d110b6082b96ea13fb042e5d907feebd06a67d7337e4697545","readback_identity":"d3538c413eb2afb07faab78032fb84c211e942b9ea56321659208f478a9ed544"},
+    {"table":"dim_date","manifest_key":"gold/dimensional/tables/v1/0859025fd0fec3226fa75c2e1cb78cd46d3a9286d1f3a985ba1a85df197d6641/dim_date.json","snapshot_id":4900478091675674353,"row_count":5844,"file_count":1,"file_bytes":36985,"manifest_identity":"461dc07f111d6db1c48ac16d0927ea07ca4b478a82a6e1a6dfd6c1e50e08f24b","schema_identity":"70718411935c9169e4b51c2125172efca840355a9ae7fc030aaee006f826ceeb","readback_identity":"5f6cbf4ea70c7be6df09a7f761057208561c18dee011ac2777a7b90c41370be0"},
+    {"table":"dim_product","manifest_key":"gold/dimensional/tables/v1/0859025fd0fec3226fa75c2e1cb78cd46d3a9286d1f3a985ba1a85df197d6641/dim_product.json","snapshot_id":4247959811429017090,"row_count":1001,"file_count":2,"file_bytes":20137,"manifest_identity":"8e52087a41b1abf457d829c417663cb532070ed19898d6f19b75d32be26b06bb","schema_identity":"726b0aab99f76b29ae9f4718d64f2c5e2f5c06609cc33d1007479fc4f6797252","readback_identity":"37aa8b06716c3124ab5063c8f66363cbc43e4779cbc5f735db2546f675e5259b"},
+    {"table":"fact_orders","manifest_key":"gold/dimensional/tables/v1/0859025fd0fec3226fa75c2e1cb78cd46d3a9286d1f3a985ba1a85df197d6641/fact_orders.json","snapshot_id":9113050593808780952,"row_count":1,"file_count":1,"file_bytes":3088,"manifest_identity":"526bfd81493d9dc9942a461161a742bb08a3295d3cd9849fa15c2956cbb55ec1","schema_identity":"0e351788169dc2581544ffc59417254b8ccba77e53181f80be5cd53f0f8c50d4","readback_identity":"292ed86745c465a047b9c491360156a6afc864934c89eb88a645fba63c7c7b85"},
+    {"table":"fact_order_items","manifest_key":"gold/dimensional/tables/v1/0859025fd0fec3226fa75c2e1cb78cd46d3a9286d1f3a985ba1a85df197d6641/fact_order_items.json","snapshot_id":2847435404936673971,"row_count":1000,"file_count":1,"file_bytes":22145,"manifest_identity":"8a668fe566ba988eabd6289535f4de5b8222c7d524e7c087d00b93ea084bd534","schema_identity":"d21d2aff75b0eba43413674a04b6b2ae82bfdd50dc6e184dcda887930251c178","readback_identity":"7c17762f7f67fd14c9328ffdc84be052a6fd154839551f98ac5e8879abf6a166"},
+    {"table":"fact_payments","manifest_key":"gold/dimensional/tables/v1/0859025fd0fec3226fa75c2e1cb78cd46d3a9286d1f3a985ba1a85df197d6641/fact_payments.json","snapshot_id":2572933825877972806,"row_count":1,"file_count":1,"file_bytes":1962,"manifest_identity":"ccccdcbe840d58a41930d36b26956870da98d0b4dabdca4968158fd86fc0ebd6","schema_identity":"d9af017ee1ce6d67c79a4f97827571566bcc6d884969af1aee18158f0a1d5677","readback_identity":"79fcc9e1a92579f86a66d8cd3e2d4230f4bd7794a5bc405ca9a944cf29f0261b"},
+    {"table":"fact_shipments","manifest_key":"gold/dimensional/tables/v1/0859025fd0fec3226fa75c2e1cb78cd46d3a9286d1f3a985ba1a85df197d6641/fact_shipments.json","snapshot_id":8103167758707705927,"row_count":1,"file_count":1,"file_bytes":1632,"manifest_identity":"4ea9171db8ac9f02817146a4108730f309589a9c3ec5411283996489036fca06","schema_identity":"5bdd56fe26213075a7cd3a99306e9c31a8bbff1ac5dd3a2c083a8ab35f2c0164","readback_identity":"d6d2ddbed29ebe21761a2a96173d7b3149aada477668f7754765974f2023dc8c"}
+  ],
+  "verification": {"writer_status":"PUBLISHED","graph_status":"VERIFIED","runtime_writes":"candidate_only"}
+}

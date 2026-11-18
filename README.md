@@ -67,7 +67,7 @@ MinIO, PostgreSQL, or any runtime write:
 
 ```powershell
 $env:QUALITY_IT_RUN_ID = 'local-demo-01'
-$env:QUALITY_IT_BUCKET = 'ecommerce-quality-it'
+$env:QUALITY_IT_BUCKET = 'ecommerce-lakehouse-quality-it'
 $env:QUALITY_IT_PREFIX = 'quality-it/local-demo-01/'
 $env:NESSIE_URI = 'http://127.0.0.1:19130/api/v2'
 $env:NESSIE_REF = 'main'

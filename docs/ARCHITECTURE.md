@@ -21,6 +21,14 @@ been retired; no analytical loader, dbt project, or dbt service is required.
 
 ## Runtime configuration
 
+The canonical production storage contract uses bucket
+`ecommerce-lakehouse-prod` with `bronze/<table>/`, `silver/<table>/`, and
+`gold/<table>/` keys and Nessie ref `gold_prod_current`. Quality validation is
+isolated in `ecommerce-lakehouse-quality-it`; the legacy
+`ecommerce-data-lake` namespace remains bounded and test-only. Layout
+validation is pure and fail-closed before any MinIO, Spark, PostgreSQL, or
+Nessie client is created.
+
 `INGESTION_WRITE_ENABLED` and `GOLD_DIMENSIONAL_ENABLED` default to false;
 dimensional writes have a separate
 `GOLD_DIMENSIONAL_WRITE_ENABLED` guard. Production cutover and operational

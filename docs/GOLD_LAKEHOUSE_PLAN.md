@@ -1,5 +1,593 @@
 # Gold Lakehouse Development Plan
 
+## Stable promotion and continuous incremental WRITE enabled (2026-11-18)
+
+- Read-only Silver-derived parity passed for all seven r04 Gold tables.
+- Approved Nessie CAS advanced `gold_prod_current` to the verified r04 hash;
+  post-promotion stable readback passed for all seven tables.
+- Continuous incremental WRITE is enabled and the incremental DAG is unpaused
+  on the `*/15 * * * *` schedule with `max_active_runs=1`.
+- `BI_ACTIVE_PUBLISH_APPLY=0` remains set, so the DAG does not perform another
+  automatic stable-ref promotion or BI cutover.
+
+## Gold production candidate r04 runtime certification - PASS WITH WARNINGS (2026-11-18)
+
+- The approved full-Silver candidate r04 completed a seven-table Gold graph
+  on `gold_prod_candidate_v2_cert_20261118_r04` and namespace
+  `gold_candidate_v2_cert_20261118_r04`.
+- Independent Spark/Nessie/MinIO read-only verification passed for all seven
+  pinned snapshots with positive file, byte and row evidence.
+- Stable ref `gold_prod_current` remained unchanged. No stable publication,
+  BI consumer cutover, cleanup, rollback, checkpoint or watermark mutation was
+  performed.
+- Independent QA verdict: **PASS WITH WARNINGS**. The only warning is missing
+  captured `GOLD_CANDIDATE_RESULT` stdout; persisted read-only evidence remains
+  complete. Stable publish/cutover are not certified by this result.
+
+## Continuous Gold WRITE cadence implementation (2026-11-17)
+
+- Approved code scope is implemented: `ecommerce_incremental_ingestion` now
+  uses `*/15 * * * *`, with existing timezone handling, `catchup=False`, and
+  `max_active_runs=1` preserved.
+- `gold_dimensional_write` is explicitly non-retrying (`retries=0`) because a
+  failed external write may have partial state; timeout behavior remains in
+  place. Gold publication and confirmation tasks remain non-retrying and gate
+  on verified writer evidence.
+- Compose and `.env.example` remain fail-closed (`GOLD_DIMENSIONAL_ENABLED`
+  false, `GOLD_DIMENSIONAL_MODE=DRY_RUN`, write flag false); production
+  approval is blank/unset by default and only wired through when explicitly
+  supplied. No runtime configuration was enabled.
+- This is static/unit implementation evidence only. No DAG trigger, runtime
+  write, BI publish, cutover, checkpoint/watermark mutation, or external
+  service test was performed. Continuous runtime PASS is **not claimed**;
+  independent QA and separately approved runtime certification remain open.
+
+## Session 2026-11-17: Gold v2 baseline certification plan — WAITING FOR APPROVAL
+
+- The live read-only probe confirmed the existing `dim_customer` and
+  `dim_product` snapshots are physically readable, but their v1 manifests do
+  not contain the complete v2 persisted contract required for Gate C.
+- Added `docs/plans/gold-v2-baseline-certification-plan.md` describing the
+  bounded next step: one new seven-table Gold baseline with v2 metadata,
+  followed by read-only Gate C and independent QA.
+- No Nessie ref, Iceberg table, MinIO object, PostgreSQL row, checkpoint,
+  watermark, publication or cutover was created or modified in this session.
+- Required next gate: explicit approval naming the bounded runtime write,
+  source Silver run, target ref/namespace and allowed systems. Stable publish,
+  consumer cutover and cleanup are excluded.
+
+## Session 2026-11-17: approved write preflight — BLOCKED ON CANDIDATE WIRING
+
+- Approval was received for the bounded Gold write using the approved Silver
+  run and an immutable candidate target.
+- Preflight found that the guarded `gold_candidate_orchestrator` is not yet
+  connected to a production CLI/Airflow runtime boundary, and the production
+  storage layout does not accept the required `gold_prod_candidate_*` ref.
+- Direct invocation of the native writer is rejected because it can resolve
+  the stable namespace/ref rather than the explicit candidate target.
+- No Nessie branch, Iceberg table, MinIO object, PostgreSQL row, checkpoint,
+  watermark, publication, cutover, cleanup or delete was performed.
+- Next exact step: implement and statically QA candidate-only runtime wiring;
+  then execute the already-approved bounded write and independent QA.
+
+## Session 2026-11-17: candidate runtime wiring — STATIC PASS; WRITE BLOCKED
+
+- Added the candidate-only CLI and explicit production candidate-ref support.
+- The CLI validates the plan and six-artifact bundle before creating Spark,
+  MinIO or Nessie clients, binds the target namespace/ref explicitly, and calls
+  only `ProductionGoldCandidateAdapter`.
+- Verification: **71 tests passed**, compileall PASS, `git diff --check` PASS.
+- The approved write was not started because the source run has
+  `customers/products=NO_DATA` and the available Gold dimension manifests are
+  v1, so the v2 candidate bundle validator correctly rejects them. No false
+  PASS and no runtime mutation occurred.
+- Next exact step: obtain a fresh runtime-verified v2 dimension bundle (or an
+  explicitly approved six-table Silver/Gold rebuild), then invoke the new CLI.
+
+## Session 2026-11-17: approved Silver rebuild — PASS; dimension data still absent
+
+- Triggered exactly one run: `production_silver_v2_20261117` with all six
+  tables selected and `mode=WRITE`.
+- DagRun completed `success`; Gold dimensional write and active publication
+  were skipped because Gold remained disabled.
+- `customers` and `products` still produced `NO_DATA`, so the run did not
+  create the fresh dimension PASS artifacts required for the v2 candidate
+  bundle. This is a source-data absence, not an Airflow failure.
+- No PostgreSQL seed, checkpoint reset, watermark mutation, Gold write,
+  Nessie candidate branch, cleanup or cutover was performed.
+- Next gate: explicit approval to create a bounded source delta for
+  `customers` and `products`, then rerun the six-table Silver flow once.
+
+## Session 2026-11-17: dimension source delta — PASS; fact bundle still incomplete
+
+- Created one idempotent PostgreSQL source delta for `customer_id=6226` and
+  `product_id=2681` after read-only MAX checks.
+- Follow-up run `production_silver_v2_dimensions_20261117` completed
+  `success`. Silver produced `customers=PASS (1)`, `products=PASS (1)`, and
+  `order_items=PASS (1000)`.
+- `orders`, `payments`, and `shipments` remained `NO_DATA`; therefore the
+  candidate contract still rejects the bundle because all four current facts
+  must be PASS. Gold remained disabled and no candidate branch/write occurred.
+- Next gate requires separate approval for bounded source deltas covering
+  `orders`, `payments`, and `shipments` (with FK-valid data), followed by one
+  more six-table Silver run.
+
+## Session 2026-11-17: bounded Gold candidate runtime — WRITE/READBACK PASS
+
+- Source run: `production_silver_v2_cert_20261117` with all six Silver
+  artifacts PASS.
+- Created and used only candidate ref
+  `gold_prod_candidate_v2_cert_20261117` and namespace
+  `gold_candidate_v2_cert_20261117`; stable `gold_prod_current` was not
+  advanced.
+- Nessie candidate read-back is an exact BRANCH at hash
+  `a4274ec5b703fc37a34ecb8efab17931773aa82987e37ca324a7c798cbfb59e7`.
+- Native Gold writer returned `PUBLISHED`; completed graph verification
+  returned `VERIFIED` with graph identity
+  `0859025fd0fec3226fa75c2e1cb78cd46d3a9286d1f3a985ba1a85df197d6641` and
+  exactly seven PASS table manifests/readbacks.
+- Readback rows: `dim_customer=2`, `dim_date=5844`, `dim_product=1001`,
+  `fact_orders=1`, `fact_order_items=1000`, `fact_payments=1`,
+  `fact_shipments=1`; all have positive files and PASS readback identities.
+- No stable publication, cutover, cleanup, delete, rollback, checkpoint or
+  watermark mutation occurred. Independent QA review remains the final
+  delivery gate; no commit/push/merge was made.
+
+## Session 2026-11-17: final regression gate — PASS; independent QA pending
+
+- Candidate/manifest/Airflow regression suite: **135 passed**; compileall and
+  `git diff --check` passed.
+- Runtime candidate evidence remains `WRITE/READBACK PASS` on the immutable
+  candidate ref. Stable ref and consumers were not changed.
+- Reviewer was dispatched against the implementation diff and evidence. Until
+  the reviewer returns, status is **runtime PASS / not independently
+  certified**. No commit, push or merge was made.
+
+## Session 2026-11-17: candidate isolation QA corrections — STATIC PASS; re-review pending
+
+- Reviewer found three HIGH issues: candidate ref loss in `StorageLayout`,
+  missing production bucket validation in the candidate CLI, and
+  non-deterministic candidate namespace acceptance.
+- Fixed all three: storage layout preserves the requested candidate ref, the
+  CLI validates production bucket/layout before clients, and namespace is
+  deterministic from the candidate ref.
+- Added raw runtime evidence:
+  `docs/evidence/gold-candidate-v2-runtime-20261117.json`.
+- Final regression after corrections: **146 passed**, compileall PASS,
+  `git diff --check` PASS.
+- Reviewer re-review is pending. Until it returns, do not advance
+  `gold_prod_current`; runtime remains candidate-only PASS WITH WARNINGS.
+
+## Session 2026-11-17: candidate certification — QA PASS
+
+- Added all seven Gold `manifest_key` values to the raw runtime evidence.
+- Structural evidence validation: PASS.
+- Independent reviewer re-review: **PASS**; no Critical/High/Medium finding
+  remains.
+- Candidate isolation, seven-table metadata/readback, deterministic namespace,
+  production bucket/ref routing, and no-publication/cutover guarantees are
+  accepted.
+- `gold_prod_current` remains unchanged. Stable publication/cutover requires a
+  separate explicit approval.
+
+## Session 2026-11-17: approved stable CAS promotion — PASS
+
+- Explicit approval received for stable promotion.
+- Read-back before CAS: candidate branch hash
+  `a4274ec5b703fc37a34ecb8efab17931773aa82987e37ca324a7c798cbfb59e7`;
+  stable expected hash
+  `adb060d0499e2cfd0fd38d28b3c6c3b85ef5c1aedd54238fbe3a7d652f0e196e`.
+- Applied Nessie CAS update to `gold_prod_current`; stable read-back equals
+  candidate hash and remains a `BRANCH`.
+- Post-promotion Spark read-only verification passed for all seven pinned
+  snapshots, with row/file/byte evidence matching candidate manifests.
+- No cleanup, delete, rollback, checkpoint reset or watermark mutation was
+  performed. No commit, push or merge was made.
+
+## Session 2026-11-17: live read-only Iceberg baseline probe — NOT CERTIFIED
+
+- Both pinned snapshots loaded successfully from `gold_prod_current` in the
+  Spark container and matched physical readback: `dim_customer` 6226 rows / 2
+  files / 131997 bytes; `dim_product` 2681 rows / 2 files / 49680 bytes.
+- Independent QA still classified full runtime certification **FAIL / NOT
+  CERTIFIED** because the existing v1 baseline does not persist the complete
+  v2 contract: schema/graph/stale/ref-bound identities, complete seven-table
+  graph evidence, and Silver lineage binding.
+- Sanitized audit record:
+  `docs/evidence/gold-prod-current-readonly-baseline-20261117.json`.
+
+## Session 2026-11-17: current stable-ref closure — PASS
+
+- The historical v1 baseline probe above is retained as historical evidence;
+  it does not supersede the approved v2 CAS promotion recorded earlier.
+- Current `gold_prod_current` is the promoted v2 candidate hash
+  `a4274ec5b703fc37a34ecb8efab17931773aa82987e37ca324a7c798cbfb59e7`.
+- The post-promotion seven-table pinned-snapshot read-only verification is the
+  current runtime gate evidence and passed. Candidate branch retention is
+  intentional; no cleanup, delete, rollback, checkpoint reset, or watermark
+  mutation was performed.
+- Delivery status: **PASS for the approved Gold v2 promotion scope**. No Git
+  commit, push, or merge was performed.
+
+## Session 2026-11-17: bounded production WRITE attempt — BLOCKED SAFELY
+
+- Triggered exactly one approved run:
+  `manual__gold_v2_production_write_20261117` with explicit six-table
+  `WRITE` config and process-scoped write guards.
+- Gold write failed closed in preflight before any Spark/MinIO/Nessie Gold
+  client was created: current Silver `customers=NO_DATA` caused
+  `Gold dimensional facts require current Silver PASS: customers`.
+- Airflow exhausted the task's configured retries; no additional run was
+  triggered. Gold publication, stable-ref mutation, cleanup, rollback,
+  checkpoint reset, and watermark mutation did not occur. Some approved
+  Silver tasks (`products` and `order_items`) completed before the Gold gate.
+- Temporary write guards were reverted by recreating only scheduler and
+  dag-processor; verified state is `GOLD_DIMENSIONAL_ENABLED=false`,
+  `GOLD_DIMENSIONAL_MODE=DRY_RUN`,
+  `GOLD_DIMENSIONAL_WRITE_ENABLED=false`,
+  `PRODUCTION_LAKEHOUSE_WRITE_APPROVED` unset, and
+  `LAKEHOUSE_WRITE_ENABLED=false`.
+- Next step requires either a separately approved idempotent source delta that
+  produces current PASS artifacts for `customers` and `products`, or
+  implementation/certification of the runtime snapshot-reuse adapter.
+
+## Session 2026-11-17: production Gold WRITE runtime — PASS
+
+- Approved source deltas produced a complete FK-valid Silver recovery bundle;
+  the final bounded DagRun was
+  `manual__gold_v2_silver_recovery_full_20261117`.
+- Rebuilt six read-only dimensional artifact tasks after correcting the
+  canonical manifest identity and reran the Gold task in the same DagRun.
+- Runtime result: `gold_dimensional_write=success`,
+  `publish_gold_to_active=success`, and all seven Gold confirmations
+  `success`. Writer returned `status=PUBLISHED` and
+  `verification.status=VERIFIED`.
+- Seven-table readback passed: `dim_date=5844`, `dim_customer=2`,
+  `dim_product=2`, `fact_orders=1`, `fact_order_items=1000`,
+  `fact_payments=1`, `fact_shipments=1`; every output had positive files and
+  `readback_status=PASS`.
+- Write flags were restored and verified disabled/DRY_RUN after completion.
+  No cleanup, delete, rollback, checkpoint reset, or watermark reset was
+  performed.
+- Sanitized raw task-level evidence is persisted at
+  `docs/evidence/gold-production-write-runtime-20261117.json`.
+- Independent QA review: **PASS WITH WARNINGS** initially; the evidence-gap
+  warning is addressed by the raw task-level record and requires re-review.
+
+## Session 2026-11-17: Airflow production DRY_RUN — PASS
+
+- Triggered exactly one run of `ecommerce_incremental_ingestion` with run ID
+  `manual__gold_v2_dry_run_20261117` and explicit six-table `DRY_RUN` config.
+- DagRun state: **success**. All executed validation/artifact tasks succeeded;
+  `gold_incremental_snapshot_reuse_dry_run` succeeded.
+- `gold_dimensional_write`, `publish_gold_to_active`, and all seven Gold
+  confirmation tasks were **skipped** as required by the write-disabled
+  `DRY_RUN` gate.
+- No new Gold write, publication, cutover, cleanup, checkpoint reset, or
+  watermark mutation occurred. The next gate is a separately approved single
+  production `WRITE` run followed by independent QA.
+
+## Session 2026-11-17: Gold v2 pinned snapshot metadata contract — QA PASS WITH WARNINGS
+
+- Implemented versioned Gold metadata for new dimensional writes, including
+  schema/graph/manifest identities, pinned snapshot ID, catalog coordinates,
+  explicit stale policy and readback identity. Producer and snapshot-reuse
+  validator now share canonical manifest identity semantics.
+- Added fail-closed checks for status/table/snapshot mismatches, readback hash
+  tampering, stale/future/naive timestamps, coordinate mismatches and
+  `ALREADY_PUBLISHED` metadata preservation. DRY_RUN does not emit reusable
+  PASS metadata.
+- Independent final QA verdict: **PASS WITH WARNINGS**. Evidence: 200
+  focused tests passed, AST parse passed for 213 Python files, and
+  `git diff --check` passed. No Critical/High/Medium/Low defect remains.
+- Runtime Spark snapshot-reuse dry-run on Windows did not complete because of
+  the local Spark/Hadoop environment; runtime certification remains
+  **NOT CERTIFIED**. No MinIO/Nessie/PostgreSQL object or state mutation,
+  candidate branch, production Gold WRITE, cutover, cleanup, checkpoint or
+  watermark action was performed.
+- Next step: obtain separate approval for a bounded Linux/container Spark
+  runtime dry-run, then separately gate any candidate branch creation and
+  production candidate WRITE. Do not claim production runtime PASS from this
+  static/unit verdict.
+
+- Approved bounded Linux/container command completed
+  `tests/test_gold_snapshot_reuse_dry_run.py`: **1 passed in 13.38s** with
+  WRITE/publication/cutover flags disabled. Independent QA classified this as
+  **PASS WITH WARNINGS — bounded test evidence only**: the test uses injected
+  readers and monkeypatched storage, so it does not certify live
+  Iceberg/Nessie/MinIO snapshot reads or production runtime. Runtime gate stays
+  **NOT CERTIFIED**.
+
+## Session 2026-11-17: Gate C artifact-bundle QA and production preflight — BLOCKED
+
+- Independent QA verdict for the read-only artifact bundle implementation:
+  **PASS WITH WARNINGS**; 32 focused tests passed, compileall and
+  `git diff --check` passed, with no Critical/High/Medium findings.
+- Read-only production evidence was rechecked for the approved Silver run
+  `production_silver__20261117T031723Z__3d525ed68c967f928f85538a3f7091db`.
+  The four Silver manifests contain checksum, lineage evidence and producer
+  `run_id`; the Airflow `silver_result_*` XCom envelopes do not expose all of
+  those fields directly, so the bundle must be built from the stored manifests.
+- Gate C remains **BLOCKED before candidate creation** because the existing
+  Gold `dim_customer`/`dim_product` metadata has snapshot/readback evidence but
+  lacks the complete pinned-reuse contract: canonical schema and graph
+  evidence, stale policy, and ref-bound readback. No synthetic evidence was
+  accepted, and no Nessie ref, Spark job, Gold WRITE, checkpoint, watermark,
+  publication, or cleanup mutation was performed.
+- Next exact step: produce a runtime-verified Gold baseline manifest carrying
+  the full pinned-reuse contract (or obtain a fresh approved dimension build),
+  then rerun Gate C read-only. Candidate branch creation remains a separate
+  explicit approval gate.
+
+- Additional read-only Spark evidence: `dim_customer` and `dim_product` both
+  loaded successfully from `gold_prod_current`; observed columns match the
+  declared contract, with readback `6226 rows / 2 files / 131997 bytes` and
+  `2681 rows / 2 files / 49680 bytes` respectively. This closes the schema and
+  physical readback check only; it does not manufacture the missing persisted
+  graph/stale-policy/ref-bound evidence, so Gate C remains blocked.
+
+## Session 2026-11-17: bounded Gold snapshot-reuse runtime attempt — not certified
+
+- Separately approved read-only Spark `DRY_RUN` attempted with write,
+  publication, cutover, checkpoint, and feature-enable flags disabled.
+- Local Spark produced no output within the safe 50-second bound and was
+  stopped safely; exit code `1`.
+- Independent QA verdict: **FAIL — runtime certification gate; NOT CERTIFIED
+  (timeout)**. No false PASS and no observed external mutation.
+- Do not retry in the same environment. A materially different bounded Spark
+  environment and fresh explicit approval are required before another attempt.
+
+## Session 2026-11-17: Gold snapshot reuse implementation — static QA complete
+
+- Implemented mixed Silver/Gold resolution: unchanged `customers/products`
+  dimensions may reuse pinned verified Gold snapshots; facts require current
+  Silver `PASS` artifacts and fact `NO_DATA` fails closed.
+- Added mixed lineage, deterministic resolution identity, pre-client
+  validation, JSON-safe XCom boundary checks, and regression coverage.
+- Independent QA verdict: **PASS WITH WARNINGS**. Focused QA tests passed
+  (`74 passed`), compileall and diff-check passed; no Critical/High/Medium
+  finding remains.
+- Spark/Iceberg/Nessie/MinIO runtime behavior is **not certified**. The feature
+  flag remains disabled by default; no production Gold WRITE, publication,
+  cutover, or runtime mutation was performed.
+
+## Session 2026-11-17: Gold snapshot reuse explicit-gate correction — static evidence
+
+- Runtime merge-plan construction now honors the existing
+  `GOLD_INCREMENTAL_SNAPSHOT_REUSE_ENABLED` helper and cannot implicitly enable
+  pinned dimension reuse when called outside the preflight path.
+- Regression coverage confirms mixed dimension `NO_DATA` with a valid pinned
+  artifact fails closed before snapshot/Silver reads when the flag is absent.
+- Focused suite: **174 passed**; compileall exit `0`; `git diff --check` exit
+  `0` with existing LF/CRLF conversion warnings.
+- This is implementation evidence only. No DAG trigger, external runtime
+  client, production flag enablement, Gold write, cutover, or runtime
+  certification is claimed.
+
+## Session 2026-11-17: canonical Silver identity re-verification — blocker closed
+
+- Fresh candidate `production_silver__20261117T031723Z__3d525ed68c967f928f85538a3f7091db`
+  completed `success`: 59 tasks, 42 `success`, 17 `skipped`, 0 failed.
+- `customers` and `products` were `SKIPPED / NO_DATA`, confirmed as expected
+  no delta at the effective checkpoint; no retry, backfill, reset, cleanup, or
+  mutation was performed for them.
+- For `orders`, `order_items`, `payments`, and `shipments`, exact XCom
+  `manifest_key` read-back matched MinIO stored manifests, and each satisfied
+  `XCom identity = stored identity = canonical identity`.
+- Independent QA verdict: **PASS WITH WARNINGS**; no Critical/High/Medium
+  finding. The Silver manifest-identity blocker is closed for the four
+  committed tables. Full six-table data coverage is still not claimed because
+  two tables had no delta.
+- Gold runtime, consumer cutover, and production publication remain open and
+  require a separate explicit approval gate.
+
+## Session 2026-11-17: fresh production Silver run - six-table gate remains open
+
+- Exactly one new candidate was triggered:
+  `production_silver____dee17da68cca499299c18eb45cbbabcf`, logical date
+  `2026-11-17T02:45:56Z`; the Airflow POST returned HTTP `200`.
+- DagRun completed `success` with 59 task instances: 42 `success`, 17
+  `skipped`, 0 failed. No retry, reset, cleanup, commit, or Gold launch was
+  performed. JWT handling was memory-only.
+- Production guards were correct: bucket `ecommerce-lakehouse-prod`, ref
+  `gold_prod_current`, ingestion enabled; E2E/quality-it unset; warehouse,
+  lakehouse, Gold, publish, cutover, backfill, checkpoint/watermark and cleanup
+  disabled.
+- Read-back found committed Silver artifacts for `orders`, `order_items`,
+  `payments`, and `shipments`; each had Bronze input, one Silver Parquet file,
+  completion manifest, quality evidence, reconciliation evidence, and exact
+  prefix containment. `customers` and `products` were `NO_DATA` and therefore
+  have no six-table manifest/evidence in this run.
+- Stored MinIO manifest identities differed from the corresponding Silver
+  XCom identities for all four committed tables. Quality/reconciliation
+  evidence reported `PASS`, but this mismatch blocks immutable six-table
+  runtime certification.
+- Verdict: **PASS** for safe single production Silver execution and bounded
+  read-back; **OPEN / NOT CERTIFIED** for the Gold runtime gate. Do not retry,
+  reset, clean up, or launch Gold. Independent QA must review this evidence
+  before any next action.
+
+## Session 2026-11-17: production config reconcile and stale/import recovery
+
+- Recreated only `airflow-scheduler` and `airflow-dag-processor` with
+  process-scoped production layout (`ecommerce-lakehouse-prod`,
+  `gold_prod_current`). `.env` was not edited; API server and other services
+  were not restarted; no DAG was triggered.
+- Both processes are `running`, `oom=false`, with
+  `INGESTION_WRITE_ENABLED=true`; warehouse/lakehouse/Gold,
+  cutover/publish/backfill/checkpoint/watermark/cleanup paths remain disabled.
+- `AIRFLOW_LOCAL_E2E_MODE`, all `LAKEHOUSE_E2E_*`, and all `QUALITY_IT_*` keys
+  are unset in both recreated processes.
+- Authenticated GET-only verification passed: health 200 with scheduler, dag
+  processor, and metadatabase healthy; import-errors 200 with
+  `total_entries=0`; DAG details 200 with `is_stale=false` and
+  `has_import_errors=false`.
+- Verdict: **PASS** for production config reconciliation and import/stale
+  recovery; **OPEN / NOT CERTIFIED** for end-to-end runtime certification.
+  No DAG trigger, data-plane operation, or destructive maintenance occurred.
+- QA handoff: independently verify sanitized Docker evidence and GET-only
+  results before advancing the Gold runtime gate. No commit was made.
+
+## Session 2026-11-17: independent QA - latest bounded trigger hard-stop
+
+- Verdict: **PASS** for safe hard-stop; **FAIL / BLOCKED** for runtime
+  certification.
+- Fresh candidate `qualityit__20261117T__` used logical date
+  `2026-11-17T02:01:00Z`; its single exact OpenAPI-path Airflow POST returned
+  HTTP `404`. Evidence records a memory-only JWT and no DagRun, task, or data
+  mutation; no retry, reset, cleanup, Docker, DAG, or Gold action is authorized.
+- Current blocker classification: **POST route/contract-specific**. The
+  read-only GET diagnosis resolved the Airflow route and exact DAG metadata,
+  so the prior classification is superseded for current status; the earlier
+  **endpoint/DAG discovery** wording remains preserved in the historical QA
+  entry below. The evidence does not identify which POST contract detail
+  caused the `404`, and does not indicate an ingestion or data-plane failure.
+  Runtime certification remains **OPEN / NOT CERTIFIED**.
+- QA documentation correction: updated only this current classification and
+  the related semantic-plan probe-count wording; prior endpoint/DAG discovery
+  history remains unchanged. `git diff --check`: **PASS**. No source,
+  configuration, `.env`, POST/DAG, restart, or data-store action was performed.
+
+## Session 2026-11-16: independent QA — process-scoped E2E injection
+
+- Reviewed the latest evidence in
+  `docs/plans/semantic-runtime-certification-plan.md`.
+- Acceptance result: **PASS WITH WARNINGS**. Only
+  `airflow-scheduler` and `airflow-dag-processor` were recreated with
+  `--no-deps --force-recreate`; both are recorded as `running`, image
+  `ecommerce-airflow:3.1.7`, `oom=false`.
+- The exact bounded contract is recorded as approved: `LAKEHOUSE_E2E_APPROVED=1`,
+  bucket `ecommerce-data-lake`, run ID
+  `qualityit_20261116232139_0a5f832a06fc`, and prefix
+  `quality-it/qualityit_20261116232139_0a5f832a06fc/`. `INGESTION_WRITE_ENABLED`
+  is `true`; Gold, lakehouse, warehouse, historical backfill, publication and
+  all Iceberg cutover guards remain disabled.
+- No DAG, token/API, task, or data-plane operation was performed or authorized
+  by this QA review. Runtime Silver/Gold certification remains **OPEN / NOT
+  CERTIFIED** because no trigger/read-back/manifests/checksums/reconciliation
+  evidence exists.
+- Exact next step: obtain separate explicit approval for one fresh bounded
+  trigger and its runtime verification. Do not trigger, retry, reset, clean up,
+  or access data stores from this evidence.
+
+## Session 2026-11-16: independent QA — Silver preflight hard-stop
+
+- Reviewed the latest three-service host-inspection evidence recorded in
+  `docs/plans/semantic-runtime-certification-plan.md`.
+- QA verdict: **PASS** for safe hard-stop handling. `INGESTION_WRITE_ENABLED`
+  is `false`; E2E approval is `0` with bucket/prefix/run-id unset; Gold,
+  warehouse, lakehouse, historical backfill, and all six cutover guards are
+  disabled. The operation stopped before trigger, with no DagRun or data
+  mutation claimed.
+- This verdict covers preflight safety only; Silver lineage/runtime
+  certification remains **OPEN/BLOCKED**. No Docker or DAG was run for this QA.
+- Exact next step: after separate explicit approval, recreate only the needed
+  scheduler/worker service with command-scoped
+  `INGESTION_WRITE_ENABLED=true`, then host-inspect the effective flags before
+  any trigger. Stop on any mismatch.
+
+## Session 2026-11-16: Airflow write-disabled service recreate
+
+- Approved scope: recreate only `airflow-scheduler`, `airflow-dag-processor`,
+  and `airflow-api-server` after applying the already-approved
+  `LAKEHOUSE_WRITE_ENABLED=false`. No `.env` edit, DAG trigger, data-store
+  access, retry/reset/cleanup, commit, push, merge, or other service action.
+- Exact command executed:
+  `docker compose up -d --no-deps --force-recreate airflow-scheduler airflow-dag-processor airflow-api-server`.
+- Compose result: all three named containers were `Recreated` and `Started`.
+  Docker reported an existing `ecommerce-spark` orphan warning; no
+  `--remove-orphans` was used and `ecommerce-spark` was not touched.
+- Exact post-recreate host-side allowlisted inspect evidence (no `docker exec`,
+  no full environment/secrets output):
+  - `ecommerce-data-platform-airflow-scheduler-1`: `status=running`,
+    `running=true`, `oom=false`, `image=ecommerce-airflow:3.1.7`,
+    `LAKEHOUSE_WRITE_ENABLED=false`.
+  - `ecommerce-data-platform-airflow-dag-processor-1`: `status=running`,
+    `running=true`, `oom=false`, `image=ecommerce-airflow:3.1.7`,
+    `LAKEHOUSE_WRITE_ENABLED=false`.
+  - `ecommerce-data-platform-airflow-api-server-1`: `status=running`,
+    `running=true`, `oom=false`, `image=ecommerce-airflow:3.1.7`,
+    `LAKEHOUSE_WRITE_ENABLED=false`.
+- Verification verdict: **PASS** for the requested service recreate and
+  write-disabled runtime parity. No DAG or data operation was triggered.
+- QA handoff: independently review this exact operational evidence and confirm
+  no scope expansion; no further runtime action is authorized by this entry.
+
+## Session 2026-11-16: independent QA — lakehouse write deny-by-default
+
+- Review scope: `docker-compose.yml`, `.env.example`,
+  `.env.quality-it.local.example`, `tests/test_quality_it_local_compose.py`,
+  and this plan entry. No Airflow service, DAG, database, MinIO object,
+  Nessie ref, checkpoint, or runtime state was modified.
+- Acceptance results: `docker-compose.yml:14` uses
+  `"${LAKEHOUSE_WRITE_ENABLED:-false}"`; both committed templates contain the
+  literal `LAKEHOUSE_WRITE_ENABLED=false`; rendered Compose with the variable
+  absent resolves `false` for `airflow-init`, `airflow-api-server`,
+  `airflow-scheduler`, and `airflow-dag-processor`.
+- Verification: `.venv\Scripts\python.exe -m pytest
+  tests/test_quality_it_local_compose.py -q` — **14 passed**;
+  scoped `compileall` — **PASS**; `docker compose config --quiet` — **PASS**;
+  rendered Compose inspection — **PASS**; `git diff --check` — **PASS**.
+  Docker emitted only inaccessible local config/missing host-variable warnings;
+  no service was started or restarted and no DAG was triggered.
+- `.env` has no Git diff and was not edited. Its existing
+  `LAKEHOUSE_WRITE_ENABLED=false` line is unchanged.
+- Independent QA verdict: **PASS WITH WARNINGS** for this scoped flag change.
+  The working tree contains many unrelated modifications, including additional
+  changes in some reviewed files; this verdict is not approval of those changes
+  or of the whole tree.
+- Required fix: none for the scoped deny-by-default flag. Before delivery,
+  isolate/clean unrelated changes or review them separately; runtime
+  certification and any write/cutover operation remain separately gated.
+
+## Session 2026-11-16: explicit lakehouse write deny-by-default configuration
+
+- Approved scope: add only the `LAKEHOUSE_WRITE_ENABLED` Compose default, literal
+  `false` values to the two committed env templates, the matching static
+  regression assertions, and this plan evidence. `.env`, backups, runtime code,
+  DAGs, checkpoints and data stores remain untouched.
+- Implementation: root `docker-compose.yml` now injects
+  `LAKEHOUSE_WRITE_ENABLED: "${LAKEHOUSE_WRITE_ENABLED:-false}"`; both
+  `.env.example` and `.env.quality-it.local.example` declare
+  `LAKEHOUSE_WRITE_ENABLED=false`.
+- Verification evidence: `docker compose config --quiet` **PASS**; sanitized
+  rendered Compose inspection resolved `LAKEHOUSE_WRITE_ENABLED=false` for
+  `airflow-init`, `airflow-api-server`, `airflow-scheduler`, and
+  `airflow-dag-processor`; focused
+  `tests/test_quality_it_local_compose.py` **14 passed**; scoped source/test
+  `compileall` **PASS**; `git diff --check` **PASS**. Docker emitted only the
+  pre-existing inaccessible local config warning. No Compose service was
+  started or restarted and no DAG was triggered.
+- QA handoff: independently review the scoped diff and confirm the rendered
+  value is `false` when the variable is absent. Runtime certification remains
+  open; this static change does not enable any write path or cutover.
+
+## Session 2026-11-16: bounded scheduler recreate — stopped before trigger
+
+- Approved scope: recreate only `airflow-scheduler` with command-scoped
+  `INGESTION_WRITE_ENABLED=true`; no dependencies, `.env` edit, other service
+  restart, Gold launch, commit, push, merge, reset, retry, or cleanup.
+- Pre-recreate effective compose evidence: `airflow-scheduler` image
+  `ecommerce-airflow:3.1.7`, command `scheduler`; ingestion was `false`,
+  warehouse/lakehouse writes were disabled, all six Iceberg cutover flags were
+  `false`, Gold was disabled with `DRY_RUN`, publication was `0`, and
+  historical backfill was disabled with `DRY_RUN`.
+- Exact service action: `docker compose --env-file .env up -d --no-deps
+  --force-recreate airflow-scheduler` with process-scoped
+  `INGESTION_WRITE_ENABLED=true`. Result: container
+  `ecommerce-data-platform-airflow-scheduler-1` was `Recreated` and `Started`;
+  image remained `ecommerce-airflow:3.1.7`. The compose orphan warning for
+  `ecommerce-spark` was informational; `--remove-orphans` was not used.
+- Post-recreate service read-back: scheduler was `Up` (`13 seconds`) when
+  checked. The sanitized-flag read-back command failed with
+  `sh: 1: Syntax error: "(" unexpected` due to the shell filter expression.
+- Gate result: **STOPPED BEFORE TRIGGER**. No new `run_id`, DagRun, task
+  instance, API trigger, worker execution, MinIO manifest, schema, quality,
+  reconciliation, or prefix read-back evidence exists for this session.
+- Required next step: obtain explicit direction to run one corrected,
+  read-only sanitized-flag preflight. If it passes, a fresh unique six-table
+  run may be considered under the existing approval; if it fails, stop again.
+
 ## Session 2026-11-11: explicit Gold Parquet contract
 
 - Implementation: Gold Iceberg table creation now declares
@@ -134,6 +722,39 @@ local `WRITE` retry, recovery contract và Phase C local-stack runner.
 ## Approval boundaries
 
 ## Native Gold dimensional v1 expansion
+
+## Session 2026-11-16: independent QA — disposable Airflow no-op diagnostic
+
+- Verdict: **PASS WITH WARNINGS** for the scoped Airflow 3.1.7 no-op only.
+- Confirmed target `confirm_gold_dimensional_dim_date` is an `EmptyOperator`;
+  recorded runtime evidence shows exit `0`, task success for TI
+  `01a1e447-9730-7342-a13f-04d0679965ba`, health `200`, protected endpoint
+  `401` without secret exposure, no termination/error markers,
+  `dag_run_found=false`, and no failed-run reuse or data writes.
+- Warning: raw runtime logs are summarized rather than stored as immutable repo
+  artifacts, and the working tree contains unrelated changes. No whole-tree
+  approval is implied.
+- Exact next step: obtain separate explicit approval before one fresh immutable
+  bounded six-table run. Keep the failed run untouched and Gold WRITE/cutover
+  disabled; production/runtime certification remains **OPEN/BLOCKED** until
+  Silver lineage, exact-run identity, read-back and integrity evidence pass.
+
+## Session 2026-11-16: bounded Gold snapshot-reuse writer integration
+
+- Status: **PASS WITH WARNINGS (bounded code/unit scope)**.
+- The writer consumes only an explicit, revalidated incremental merge plan;
+  reused dimensions are passed as already-verified DataFrames. Existing Gold
+  transformations, grain/FK quality checks, MERGE keys, fences and pinned
+  readback remain authoritative.
+- Default-off guard and fail-closed missing/tampered plan behavior are covered
+  by pure/fake tests. Focused suite: **47 passed**; scoped `compileall` and
+  `git diff --check` passed.
+- No DAG wiring, feature enablement, Spark/MinIO/Nessie/Postgres external
+  runtime, external write, checkpoint mutation, maintenance or cutover was
+  performed. Runtime snapshot read/merge certification remains pending.
+- Next step: independent QA reviewer handoff, followed by a separately
+  approved controlled `DRY_RUN`; keep `GOLD_INCREMENTAL_SNAPSHOT_REUSE_ENABLED`
+  disabled until those gates pass.
 
 - Status: **PASS WITH WARNINGS (local-only runtime)**; production/disposable
   certification and cutover remain pending.
@@ -777,3 +1398,812 @@ not perform external table/object writes.
   runtime phase; no data/catalog mutation is part of this refactor.
 - Verification: focused registry/Gold/REST/Trino/Metabase compatibility suite
   **42 passed**, `compileall` **PASS**, and `git diff --check` **PASS**.
+
+## Session N — Gold graph lock recovery handling (2026-11-14)
+
+- Converted matching MinIO graph-fence `PreconditionFailed` failures into the
+  deterministic `GRAPH_FENCE_ALREADY_HELD` /
+  `GRAPH_FENCE_RECOVERY_REQUIRED` operator-facing error, including the exact
+  lock key and graph identity.
+- Preserved fail-closed behavior: mismatched fences remain hard conflicts;
+  no lock deletion, overwrite, source read, table merge, or runtime E2E write
+  was introduced.
+- Verification: focused writer suite **17 passed**, combined writer/XCom
+  suite **23 passed**, `compileall` **PASS**, and `git diff --check` **PASS**.
+- Independent QA verdict: **PASS**, with no Critical/High/Medium findings.
+- Runtime lock inspection and recovery remain pending separate operator
+  approval; the runtime gate and consumer/cutover boundaries remain open.
+
+- Approved runtime attempt `manual__demo20261114a` validated the new bounded
+  prefix and completed Bronze/Silver plus lineage artifacts, but Gold failed
+  closed on `fact_payments` having an unresolved `order_id` foreign key.
+  The automatic retry encountered the expected immutable fence and the DAG
+  ended `failed`; no active publish, cutover, lock deletion, or checkpoint
+  reset occurred. Next action is to fix payments/orders parity and use a new
+  approved immutable run ID.
+
+## Session O — payments/orders referential parity (2026-11-14)
+
+- Root cause confirmed by read-only Spark evidence: the failed run's orders
+  artifact covered `5001..6000`, while payments covered `4020..4822`, leaving
+  **780** orphan payment `order_id` values.
+- Fixed generator `stage all` to propagate exact generated order IDs to
+  payments and shipments via parameterized `ANY(%s)` selection. Empty child
+  selections are explicit `NO_DATA` no-ops for stage `all`; standalone insert
+  guards remain strict.
+- Gold FK quality validation remains fail-closed; no `UNKNOWN_KEY` fallback was
+  added for orphan facts.
+- Focused regression suite: **10 passed**; `compileall` and `git diff --check`
+  **PASS**. The extended Spark suite has 5 Windows `python3` launch failures,
+  with no assertion failures in the implementation scope.
+- Independent QA verdict: **PASS**. Runtime rerun remains pending a new
+  immutable run ID and separate approval.
+
+## Session P — Gold artifact coverage parity (2026-11-14)
+
+- Gold artifact selection now uses only the explicitly verified same-runtime
+  Silver manifest set; it no longer scans each table's full historical prefix
+  independently.
+- Lineage preserves manifest keys/identities, data prefixes, `batch_id` and
+  row counts. A fail-closed cross-table preflight reports parent/child,
+  manifest/batch context and orphan count for payments/shipments versus
+  orders before any Gold table write.
+- Added regression coverage for stale/misaligned artifacts and aligned
+  artifacts. Integration-style tests through `run_dimensional_graph` assert
+  misaligned payments and shipments do not call Gold write boundaries.
+- Verification: focused parity/writer suite **21 passed**; related suite
+  **80 passed, 5 environment failures** from Windows Spark worker
+  `python3` launch (`CreateProcess error=1920`); process-local Spark rerun
+  **7 passed**. `compileall` and `git diff --check` **PASS**.
+- Independent re-review verdict: **PASS WITH WARNINGS**, with no
+  Critical/High/Medium findings. Runtime certification remains pending a new
+  approved immutable run; no runtime write or cutover occurred in this
+  session.
+
+- Runtime attempt `demo20261114c` used the approved bounded bucket/prefix and
+  completed the DAG as `success`, but Gold dimensional write and active
+  publish were **skipped** because a no-data Silver table skipped its
+  dimensional artifact task and blocked the downstream writer trigger rule.
+  This run is **not runtime certification**; no Gold publish/cutover,
+  checkpoint reset, lock cleanup or object deletion occurred. A separate
+  orchestration fix and new immutable run are required.
+
+## Session Q — explicit NO_DATA Gold orchestration (2026-11-14)
+
+### Coverage correction QA
+
+- Silver producer now receives the Airflow run ID as `runtime_window_id` and
+  emits coverage metadata for orders/payments/shipments, including child
+  orders-parent references. Unmarked legacy artifacts fail closed.
+- Malformed/missing coverage diagnostics include table, batch, manifest and
+  coverage fields; validation remains before Gold fence acquisition and any
+  Gold write. Orphan parity remains defense-in-depth.
+- Verification: focused coverage/Silver/Gold suite **70 passed**;
+  `compileall` and `git diff --check` **PASS**. No runtime/external-service
+  write occurred.
+- Independent QA verdict: **PASS WITH WARNINGS**, no Critical/High/Medium
+  findings. Warning is limited to missing direct mocked `transform_batch()`
+  manifest-emission integration coverage. Runtime certification requires a
+  new approved immutable run.
+
+### Runtime follow-up `demo20261114f`
+
+- Bounded source delta: 10 customers, 10 products, 100 orders, 124 payments,
+  92 shipments. Gold ran in WRITE mode and all six artifacts succeeded.
+- Gold fail-closed parity reported **796** orphan payments and **564** orphan
+  shipments because orders, payments and shipments used independent batch IDs
+  with inconsistent coverage. The retry hit the immutable graph fence and
+  the DAG ended `failed`.
+- No active publish/cutover, lock deletion/reset or checkpoint reset occurred.
+- A separate cross-table Silver coverage fix is required before another
+  runtime certification attempt.
+
+- Runtime attempt `demo20261114g` reached the new coverage preflight but
+  failed before fence acquisition because child
+  `parent_orders_reference.manifest_identity` was missing/inconsistent.
+  No Gold write or publish occurred; the run was not retried.
+
+## Session S — parent manifest identity correction (2026-11-14)
+
+### Parent-first DAG correction
+
+- Payments and shipments Silver transforms now wait for
+  `verify_silver_orders`; the prior validation-only dependency was removed.
+- Focused verification: **33 passed**, `compileall` and `git diff --check`
+  **PASS**. No runtime/external-service write occurred.
+- Independent QA verdict: **PASS WITH WARNINGS**, no Critical/High findings.
+  Direct DAG instantiation remains unavailable in the local interpreter
+  because Airflow 3 `airflow.sdk` is missing; source-level dependency tests
+  pass. A new immutable runtime run is required; `demo20261114h` remains
+  preserved.
+
+- Runtime attempt `demo20261114i` verified the parent-first order for
+  orders/payments/shipments, but customers/products/order_items were wrongly
+  treated as orders children and failed waiting for the orders manifest. The
+  run ended before Gold write/publish; no cleanup/reset occurred. Coverage
+  parent semantics must be restricted to payments and shipments.
+
+### Runtime attempt `demo20261114h`
+
+- The approved bounded run used Gold WRITE, but payments/shipments Silver
+  transforms failed because the current orders completion manifest was not
+  available when child tasks started. Orders completed later; the DAG had
+  parent batch context but lacked a dependency on `verify_silver_orders`.
+- The DAG ended `failed` before Gold artifacts/publish; no fence cleanup,
+  checkpoint reset or object deletion occurred. A true parent-first DAG edge
+  is required before another runtime attempt.
+
+- Child Silver producers now resolve and validate the current orders
+  `COMPLETED` manifest, compute the canonical identity using Gold's rules, and
+  emit that identity in `parent_orders_reference` before child writes.
+- Verification: **17 passed**, `compileall` and `git diff --check` **PASS**;
+  no external-service/runtime write occurred.
+- Independent QA verdict: **PASS WITH WARNINGS**, no Critical/High/Medium
+  findings. Warning is limited to missing direct mocked
+  `transform_batch()` publication-path coverage. A new approved immutable
+  runtime run is required; `demo20261114g` remains preserved.
+
+- Changed dimensional artifact tasks to depend on completed `silver_result_*`
+  outputs, including `SKIPPED/NO_DATA`, instead of depending directly on
+  `verify_silver_*`.
+- Added explicit NO_DATA artifact envelopes with no fabricated batch,
+  manifest, Parquet or historical lineage. Gold preflight validates all
+  envelopes before intentionally raising `AirflowSkipException`, before any
+  Spark/MinIO/Iceberg/Nessie/publish work.
+- Added regression coverage for graph dependencies, NO_DATA/malformed
+  envelopes, valid PASS behavior and operator ordering.
+- Verification: implementation suite **56 passed**; correction/review suite
+  **37 passed**; `compileall` and `git diff --check` **PASS**.
+- Independent re-review verdict: **PASS WITH WARNINGS**, no
+  Critical/High/Medium findings. Warnings are limited to missing local
+  Airflow 3 `airflow.sdk` import environment and no separate direct PASS
+  operator execution test. Runtime certification requires a new approved
+  immutable run; `demo20261114c` remains not certified and untouched.
+
+- Runtime attempt `demo20261114d` verified all six dimensional artifact tasks
+  completed successfully through the new NO_DATA orchestration path. Gold
+  writer intentionally skipped because `GOLD_DIMENSIONAL_ENABLED` was not
+  enabled in the container (compose default `false`); this run is **not
+  certified**. No Gold publish/cutover, lock cleanup, checkpoint reset or
+  object deletion occurred. A new immutable run must explicitly enable Gold
+  with `GOLD_DIMENSIONAL_MODE=WRITE`.
+
+- Runtime attempt `demo20261114e` ran with Gold enabled and WRITE mode. All
+  six artifact tasks succeeded, then Gold intentionally skipped because the
+  `customers` artifact was explicit `NO_DATA`; the task log confirmed the
+  fail-closed preflight reason before Spark/lakehouse execution. This run is
+  **not certified**, no publish/cutover occurred, and no destructive runtime
+  operation was performed. A separate bounded source PostgreSQL delta and
+  new immutable run are required to exercise the full Gold PASS path.
+
+## Session T — narrow parent-coverage correction after `demo20261114i`
+
+- Restricted orders-parent coverage/manifest resolution to `payments` and
+  `shipments`. `customers`, `products` and `order_items` now use independent
+  runtime coverage and do not require the current orders manifest.
+- Focused verification: **40 passed**, `compileall` **PASS**, and
+  `git diff --check` **PASS**. No runtime write or state cleanup occurred.
+- Independent QA: **PASS WITH WARNINGS**, no Critical/High findings. Medium
+  residual risk: Silver verification does not fully compare child parent
+  manifest identity to the verified orders manifest; Gold remains fail-closed.
+  Low risk: local environment cannot instantiate Airflow 3 DAGs because
+  `airflow.sdk` is unavailable.
+- Runtime certification is still pending. Next action is either to harden
+  Silver-side parent identity verification or obtain explicit approval for a
+  new bounded immutable runtime run; do not retry `demo20261114i`.
+
+## Silver parent-identity hardening QA
+
+- Silver verification now checks the trusted orders XCom, runtime window,
+  parent coverage identity, parent batch, manifest key and canonical parent
+  manifest identity before child `PASS`.
+- Independent tables remain unaffected; Gold/generator/runtime state were not
+  changed.
+- Independent QA: **PASS WITH WARNINGS**, no Critical/High findings;
+  **42 passed**, compileall and diff check passed. Warnings are limited to
+  missing direct fake-XCom behavioral cases and unavailable Airflow 3 DagBag
+  runtime in the local environment.
+- Runtime certification remains pending a new bounded immutable run. Do not
+  retry `demo20261114i`; no commit, push or merge was performed.
+
+## Runtime attempt `demo20261114j`
+
+- Bounded source delta: **10 customers, 10 products, 100 orders, 296 order
+  items, 131 payments and 92 shipments** under the approved exact prefix
+  `quality-it/demo20261114j/`.
+- Airflow was corrected to include `PYTHONPATH=/opt/airflow/project:/opt/airflow/dags`
+  so the mounted `common` package imports in the DAG runtime. The run then
+  triggered successfully with `DagRunTriggeredByType.CLI`.
+- All Silver and six dimensional artifact tasks passed. Gold correctly
+  failed closed on **794** orphan payments and **780** orphan shipments against
+  the current orders artifact; its configured retry failed with the same
+  diagnostics. No Gold publish/cutover or confirmation markers completed.
+- No deletion, lock cleanup, checkpoint reset, rollback, compaction or old-run
+  retry occurred. This run is **not certified**. Next action requires a new
+  approved fix for child incremental selection/coverage parity; do not retry
+  `demo20261114j`.
+
+## Session U — exact child-order generator scope
+
+- Stage-all generator now propagates the exact orders generated in the same
+  invocation to payments and shipments. Child selection uses parameterized
+  `ANY(%s)` and a fail-closed subset guard; standalone selectors and empty
+  `NO_DATA` behavior remain intact.
+- Verification: **12 passed** focused generator tests, compileall and diff
+  check passed. Independent QA: **PASS WITH WARNINGS**, with no
+  Critical/High/Medium findings. No runtime write or retry of `demo20261114j`.
+- Runtime certification remains pending. A new immutable bounded run needs
+  separate approval after confirming corrected generator code is mounted into
+  the runtime containers.
+
+## Nessie v1 branch-create payload correction (2026-11-15)
+
+- Runtime `demo20261114k` server evidence showed
+  `POST /api/v2/trees?sourceRefName=main` returned HTTP 400 for the previous
+  `{name,type,hash}` body. Candidate `k` was absent; no Gold write occurred and
+  the run was not retried.
+- The historical Nessie adapter now sends the v1 top-level target Reference
+  payload `{name,type,hash}` while preserving `sourceRefName`.
+- Mocked coverage asserts the exact request and verifies HTTP 400 produces one
+  failed request with no retry or fallback mutation.
+- Runtime state, candidate refs, Gold data, promotion/cutover, checkpoints and
+  external services were not touched. Independent QA and runtime certification
+  remain pending; do not retry `demo20261114k`.
+
+Verification for this correction: focused historical/parse contract tests
+**83 passed**; scoped `compileall` **passed**; `git diff --check` **passed**.
+Independent QA must review the implementation diff and exact request contract
+before this correction advances. No runtime certification or external mutation
+was performed.
+
+## Runtime attempt `demo20261114k`
+
+- Generator created **100 orders, 124 payments and 96 shipments** in the new
+  bounded delta; all Silver and dimensional artifact tasks passed.
+- Gold still failed closed with **807** orphan payment order IDs and **828**
+  orphan shipment order IDs. The generator fix corrected new child creation,
+  but table-local incremental extraction still admits historical child rows
+  into the current child artifact.
+- No Gold publish/confirmation, cleanup, lock deletion, checkpoint reset or
+  old-run retry occurred. Runtime certification remains pending. The next
+  approved implementation scope must address ingestion/Silver cross-table key
+  selection without relaxing the Gold parity gate.
+
+## Session V — parent-scoped ingestion QA
+
+- Payments/shipments extraction now applies exact current orders `order_id`
+  scope to normal and replay paths, while recovery reuses staged payloads.
+  Silver validates the canonical parent orders path and fails closed before
+  child output/manifest publication for out-of-scope IDs.
+- Focused evidence: **41 + 26 passed**, compileall and diff check passed.
+  Independent QA round 2: **PASS WITH WARNINGS**, no Critical/High/Medium
+  findings. No runtime write or retry of `demo20261114j/k`.
+- Runtime certification is pending a new immutable bounded run. Keep this
+  correction isolated from pre-existing Gold/generator/config changes before
+  any commit; no commit/push/merge was performed.
+
+## Runtime attempt `demo20261114l`
+
+- Orders and independent tables passed, but parent-scoped payments/shipments
+  ingestion failed before child Silver: PostgreSQL received `ANY((...))` from
+  nested tuple binding and raised `WrongObjectType: op ANY/ALL (array)
+  requires array on right side`.
+- No child artifacts or Gold writes were produced. No retry of `demo20261114l`,
+  cleanup, lock deletion or checkpoint reset occurred.
+- Next narrow fix: bind parent IDs as a PostgreSQL-compatible array, add a
+  parameter-adaptation regression test, rerun QA, then request a new runtime
+  approval.
+
+## PostgreSQL ARRAY binding QA
+
+- Parent IDs are now normalized to a list before `order_id = ANY(%s)` binding,
+  preventing the runtime `ANY((...))` tuple error seen in `demo20261114l`.
+- Extractor regression tests: **12 passed**; compileall and diff check passed.
+  Independent QA: **PASS WITH WARNINGS**, no correctness findings.
+- Runtime certification remains pending a new immutable bounded run. Do not
+  retry `demo20261114l`; no commit/push/merge was performed.
+
+## Session W — runtime certification complete (`demo20261114p`)
+
+- Airflow 3 Gold XCom delivery is certified: the publish task receives
+  `gold_dimensional_write.return_value` through `PlainXComArg`.
+- Bounded runtime `demo20261114p` passed ingest, Silver verification, Gold
+  dimensional write, seven-table readback and active CAS promotion.
+- Nessie stable ref `bi_gold_current` now equals candidate branch hash
+  `9106977b619f7f740457683f0ce75f9567583f76e03a26088c2996e20f19d362`.
+- All seven Gold confirmation tasks succeeded. This phase is runtime
+  certified; no commit/push/merge has been performed.
+
+## Global-fence recovery contract correction (2026-11-15)
+
+- Implementation updated `gold/implementation/dimensional/manifest.py` to expose
+  deterministic global-fence conflict metadata while remaining fail-closed and
+  never releasing or overwriting another writer's fence.
+- Regression coverage was added for global/graph fence conflicts, recovery
+  state, lock metadata, and non-release behavior. The coverage-preflight test
+  fixture was corrected to reach its intended `runtime_window_mismatch`
+  diagnostic.
+- Independent QA verdict: **PASS**. Focused scoped suite: **27 passed**;
+  coverage regressions: **12 passed**; compileall and `git diff --check`
+  passed.
+- Runtime certification, stale-fence operator recovery, candidate retry,
+  promotion/cutover, and commit/push/merge remain separately gated and were not
+  performed.
+
+## Historical Spark boundary correction QA (2026-11-15)
+
+- Historical Airflow orchestration now keeps PySpark out of scheduler parse-time;
+  Silver/Gold execution is delegated to `ecommerce-spark:3.5.6` through
+  `spark-submit` with compact JSON XCom envelopes.
+- Common production/candidate/write preflight runs before lazy runtime imports;
+  the CLI independently validates all seven physical Gold readback envelopes.
+- Generic Spark operators no longer forward
+  `PRODUCTION_LAKEHOUSE_WRITE_APPROVED`; incremental behavior is unchanged.
+- Independent QA verdict: **PASS WITH WARNINGS**. Focused tests: **68 passed**,
+  one existing PySpark/pandas warning; compileall passed and tracked diff check
+  passed.
+- Warnings at the time of that QA handoff: untracked files were not covered by
+  Git's ordinary diff check, and the historical DAG remained paused. The
+  subsequent bounded runtime certification and stable initialization are
+  recorded below; `demo20261114k` remains unretried.
+
+## Session X — historical runtime certification and stable initialization (2026-11-16)
+
+- Bounded historical run `prodbackfill20261115m` completed with all ingest,
+  Silver, Gold verification, and candidate verification tasks successful.
+- Gold returned `VERIFIED` with seven physical outputs and successful
+  read-back/consistency attestations: `dim_date`, `dim_customer`,
+  `dim_product`, `fact_orders`, `fact_order_items`, `fact_payments`, and
+  `fact_shipments`.
+- Candidate branch
+  `gold_prod_backfill_prodbackfill20261115m` is pinned at
+  `adb060d0499e2cfd0fd38d28b3c6c3b85ef5c1aedd54238fbe3a7d652f0e196e`.
+- After explicit approval, absent `gold_prod_current` was initialized from
+  the verified candidate. Read-back shows `gold_prod_current` and the candidate
+  are both `BRANCH` refs at the same hash.
+- Runtime gate status: **CERTIFIED for the bounded candidate; stable ref
+  initialized**. This was guarded initialization, not a CAS promotion, because
+  no stable ref existed. No consumer cutover, checkpoint reset, cleanup, or
+  commit/push/merge was performed.
+
+### Open operational items
+
+- The local `.env` still points at the unused prepared `prodbackfill20261116n`
+  candidate settings and should be reset before the next run.
+- Earlier diagnostics exposed credentials locally; rotate them operationally
+  without placing replacement secrets in the repository.
+- Any future cutover or new backfill remains a separately approved action.
+
+## Incremental snapshot-reuse runtime gate status (2026-11-16)
+
+- Unit/static controlled writer-DAG boundary: **PASS WITH WARNINGS**.
+- Docker Spark/Nessie metadata probe: **PASS WITH WARNINGS**, read-only only.
+- Immutable six-table Silver lineage discovery: **FAIL — BLOCKED**. Existing
+  manifests are not bound into one verified envelope, required provenance and
+  quality fields are missing, and recorded Gold provenance has a bucket mismatch
+  (`ecommerce-data-lake` vs `ecommerce-lakehouse-prod`).
+- Full incremental Gold DRY_RUN, feature enablement and Production WRITE remain
+  **NOT CERTIFIED / DISABLED**. Do not advance from the bounded candidate
+  certification to incremental snapshot reuse without the required Silver
+  envelope and a fresh independent QA verdict.
+
+## Host-side static validation QA closure (2026-11-16)
+
+- Latest `docker compose config --format json` validation passed for
+  `airflow-scheduler` and `airflow-dag-processor`: ingestion `false`, Gold
+  `false`/`DRY_RUN`, publication `0`, and historical backfill `0`/`DRY_RUN`.
+- `LAKEHOUSE_WRITE_ENABLED` has a source default of `false`; warehouse write
+  and Iceberg cutover keys are absent/unverified. `docker inspect` was
+  unavailable because of Docker named-pipe permission.
+- Independent QA verdict: **PASS WITH WARNINGS** for host-side static evidence
+  only. Runtime certification remains **NOT CERTIFIED / OPEN**; no DAG or data
+  mutation was performed or claimed.
+- Exact next step: obtain separately approved, allowlisted read-only evidence
+  proving the effective warehouse/cutover defaults before any runtime action.
+
+## Host-side allowlisted scheduler inspect (2026-11-16)
+
+- Approved operation: read-only `docker inspect` on
+  `ecommerce-data-platform-airflow-scheduler-1` only. No `docker exec`, DAG
+  trigger, restart, store access, retry/reset/cleanup, or `.env` edit occurred.
+- Sanitized container metadata: `State=running`, `Running=True`,
+  `RestartCount=0`.
+- Sanitized effective allowlist:
+  - `INGESTION_WRITE_ENABLED=true`
+  - `WAREHOUSE_WRITE_ENABLED=false`
+  - `LAKEHOUSE_WRITE_ENABLED=<absent>` (not inferred to be `false` from source
+    defaults)
+  - `GOLD_DIMENSIONAL_ENABLED=false`
+  - `GOLD_DIMENSIONAL_MODE=DRY_RUN`
+  - `GOLD_DIMENSIONAL_WRITE_ENABLED=false`
+  - `CUSTOMERS_ICEBERG_CUTOVER_ENABLED=false`
+  - `PRODUCTS_ICEBERG_CUTOVER_ENABLED=false`
+  - `ORDERS_ICEBERG_CUTOVER_ENABLED=false`
+  - `ORDER_ITEMS_ICEBERG_CUTOVER_ENABLED=false`
+  - `PAYMENTS_ICEBERG_CUTOVER_ENABLED=false`
+  - `SHIPMENTS_ICEBERG_CUTOVER_ENABLED=false`
+  - `BI_ACTIVE_PUBLISH_APPLY=0`
+  - `HISTORICAL_BACKFILL_WRITE_APPROVED=0`
+  - `HISTORICAL_BACKFILL_MODE=DRY_RUN`
+- QA interpretation: the scheduler is not enabled for Gold dimensional write,
+  active BI publication, historical backfill write, or any of the six Iceberg
+  cutovers. `LAKEHOUSE_WRITE_ENABLED` remains unverified at runtime because it
+  is absent from the inspected container.
+- Exact next step: keep incremental snapshot reuse and all runtime write/
+  cutover gates **NOT CERTIFIED / DISABLED**; obtain separate approval for a
+  read-only parity check of `LAKEHOUSE_WRITE_ENABLED` on the relevant Airflow
+  service(s), then require independent QA before any runtime action. Do not
+  retry, reset, clean up, trigger a DAG, or enable a cutover from this evidence.
+
+## Host-side Airflow write-flag parity check (2026-11-16)
+
+- Approved operation: read-only host-side container-name resolution and
+  allowlisted inspection for `LAKEHOUSE_WRITE_ENABLED` on the three relevant
+  current containers only:
+  `ecommerce-data-platform-airflow-scheduler-1`,
+  `ecommerce-data-platform-airflow-dag-processor-1`, and
+  `ecommerce-data-platform-airflow-api-server-1`.
+- `docker ps` resolved all three names successfully. The host-side
+  `docker inspect` templates available in this environment could emit
+  `status`/`image`/`oom` but could not perform a key-only environment filter;
+  the supported filtering attempts failed before emitting container metadata.
+  The fallback of retrieving the full environment and filtering afterward was
+  not used because it would violate the sanitized allowlist requirement.
+- No secret, full environment, or container metadata was printed. No
+  `docker exec`, compose operation, restart, DAG trigger, store access,
+  retry/reset/cleanup, or `.env` edit occurred.
+- Verdict: **BLOCKED / NOT CERTIFIED** for parity. The effective
+  `LAKEHOUSE_WRITE_ENABLED` value is **unknown for all three services**; no
+  equality or runtime-default claim may be inferred. Keep incremental snapshot
+  reuse, runtime write, and cutover gates **NOT CERTIFIED / DISABLED**.
+- Exact next step: obtain a Docker-host inspection mechanism that supports
+  server-side key-only selection of `LAKEHOUSE_WRITE_ENABLED`, then repeat this
+  same read-only three-service check and require independent QA. Do not trigger
+  or retry any DAG from this evidence.
+
+## Latest bounded config application verdict (2026-11-16)
+
+- The already-approved write-disabled configuration was applied by recreating
+  only `airflow-scheduler`, `airflow-dag-processor`, and `airflow-api-server`;
+  all three containers were recreated and started successfully.
+- Latest bounded post-application evidence explicitly reports
+  `LAKEHOUSE_WRITE_ENABLED=false` on each service:
+  `airflow-scheduler`, `airflow-dag-processor`, and `airflow-api-server`.
+  This establishes explicit three-service parity for the bounded configuration
+  check; no source/config/.env value was edited by this roadmap update.
+- Verdict: **PASS** for bounded configuration application and explicit
+  write-disabled parity. The earlier parity entry remains historical evidence
+  for the prior inspection limitation (`unknown` before application/recreate)
+  and is not contradicted or rewritten by this closure.
+- Scope remains unchanged: no DAG was triggered, no runtime data or checkpoint
+  was mutated, no Iceberg cutover or consumer switch was enabled, and broader
+  runtime certification/write gates remain **NOT CERTIFIED / DISABLED**.
+# Session 2026-11-16: bounded Silver recreate — API authentication hard stop
+
+- Approved scope was limited to recreating `airflow-scheduler` and
+  `airflow-dag-processor` with process-scoped
+  `INGESTION_WRITE_ENABLED=true`, `--no-deps`; no `.env` edit or other service
+  restart was permitted.
+- Both requested containers were recreated/started and passed filtered
+  host-side inspection: image `ecommerce-airflow:3.1.7`, `running`,
+  `oom=false`, ingestion enabled, warehouse/lakehouse disabled, Gold
+  `DRY_RUN`/write-disabled, publish `0`, historical `0`/`DRY_RUN`, and all six
+  cutover flags false.
+- The single fresh six-table DagRun was **not created**: the read-only Airflow
+  API collision check and the subsequent POST were rejected with
+  `401 Not authenticated`. Execution stopped; no retry/reset/cleanup, Gold
+  launch, task/worker run, manifest/read-back, checkpoint, watermark, or data
+  store mutation occurred.
+- Verdict: **SAFE HARD STOP; Silver runtime certification OPEN/BLOCKED**.
+  Authentication must be corrected and separately approved before another
+  trigger attempt. No commit requested or made.
+
+## Production Gold WRITE runtime closure (2026-11-17)
+
+- The approved bounded Gold WRITE run
+  `manual__gold_v2_silver_recovery_full_20261117` completed **success** after
+  rebuilding six Silver dimensional artifacts and applying the canonical
+  manifest-identity correction.
+- `gold_dimensional_write`, `publish_gold_to_active`, and all seven Gold
+  confirmation tasks completed successfully. Writer status was `PUBLISHED`;
+  graph/readback verification was `VERIFIED` for all seven Gold outputs.
+- Raw task-level evidence is persisted at
+  `docs/evidence/gold-production-write-runtime-20261117.json` and records the
+  seven successful readbacks, graph/lineage identities, and disabled safety
+  operations.
+- Independent reviewer re-review verdict: **PASS**. The prior evidence-gap
+  warning is closed; no Critical, High, or Medium finding remains for this
+  scope.
+- Final scoped regression: **129 passed**; compileall and `git diff --check`
+  passed (only existing LF/CRLF normalization warnings).
+- Write flags are restored to `false`/`DRY_RUN`. No cleanup, delete, rollback,
+  checkpoint reset, watermark reset, consumer cutover, or commit/push/merge
+  was performed.
+
+## Continuous Gold WRITE implementation QA handoff — FAIL (2026-11-17)
+
+- Approved implementation scope is limited to the 15-minute schedule,
+  stateful Gold writer `retries=0`, and regression coverage. No runtime DAG
+  trigger or WRITE enablement has occurred.
+- Coder reported focused tests **82 passed**, compileall passed, and
+  `git diff --check` passed.
+- Independent QA initially returned **FAIL** because the working tree has
+  broad pre-existing uncommitted changes, so the session-owned delta could
+  not be isolated from existing snapshot-reuse orchestration. The local
+  quality profile's intentional Gold DRY_RUN opt-in was also flagged for
+  clarification.
+- Continuous scheduled WRITE remains **DISABLED / NOT CERTIFIED** pending a
+  scoped re-review. No production runtime change is authorized from the
+  failed QA verdict.
+
+## Continuous Gold WRITE implementation QA closure (2026-11-17)
+
+- Scoped independent re-review returned **PASS WITH WARNINGS**. No required
+  code fix remains for the session-owned delta: 15-minute schedule,
+  `retries=0`, timeout preservation, fail-closed defaults, and unchanged
+  pre-existing dependency graph.
+- Direct focused verification passed: **68 passed** for DAG parse/import,
+  orchestration, and pipeline-config tests.
+- A broader selected suite returned **120 passed, 1 failed** in the existing
+  recovery fixture `test_recovery_classifier_does_not_mutate_state`; the
+  fixture supplies empty lineage and now reaches the existing cross-table
+  coverage contract. It is outside this session's cadence/retry delta and was
+  not changed here.
+- `compileall` and `git diff --check` passed. Continuous runtime WRITE remains
+  **NOT CERTIFIED / DISABLED** pending a separate controlled certification run.
+
+## Continuous Gold WRITE certification attempt — BLOCKED SAFELY (2026-11-17)
+
+- With explicit approval, one controlled DagRun was triggered:
+  `manual__gold_v2_continuous_cert_20261117`.
+- Process-scoped WRITE flags were verified before trigger; BI publication
+  apply stayed `0` and snapshot reuse stayed disabled.
+- The run failed closed at Gold preflight with
+  `Gold dimensional facts require current Silver PASS: customers`.
+  The Gold writer created no Spark/MinIO/Nessie client and performed no Gold
+  mutation. No blind retry, reset, cleanup, rollback, or watermark/checkpoint
+  mutation occurred.
+- Root cause is no current PASS Silver dimension artifact for `customers`.
+  Continuous WRITE remains **NOT CERTIFIED / DISABLED** until an approved
+  source/Silver recovery produces current PASS artifacts for all six inputs.
+- Scheduler and dag-processor were recreated afterward and verified back to
+  ingestion/write disabled, Gold `DRY_RUN`/write-disabled, empty production
+  approval, and `LAKEHOUSE_WRITE_ENABLED=false`.
+
+## Approved Silver recovery after certification block — PASS (2026-11-17)
+
+- Read-only MAX checks found the previous dimension watermark at
+  `2026-11-17 08:40:00`; one FK-valid source delta was inserted for all six
+  tables with a later `updated_at` and no deletes or updates to existing rows.
+- Recovery DagRun
+  `manual__gold_v2_silver_recovery_current_20261117` completed **success**.
+- All six dimensional artifact tasks completed **success** for `customers`,
+  `products`, `orders`, `order_items`, `payments`, and `shipments`. Gold write
+  and publication were skipped because Gold remained disabled.
+- Runtime flags were restored and verified disabled/`DRY_RUN` after recovery.
+- Next gate: run one new controlled Gold WRITE certification against this
+  fresh six-artifact PASS bundle, then require independent QA before enabling
+  the 15-minute continuous schedule.
+
+## Controlled Gold WRITE certification after recovery — PASS (2026-11-17)
+
+- Gold was rerun in the same recovery DagRun after clearing only the 9 Gold
+  writer/publication/confirmation task states; the six Silver artifact PASS
+  results were preserved. The scheduler was stopped during metadata clear to
+  avoid a race, then restarted with verified process-scoped WRITE flags.
+- DagRun `manual__gold_v2_silver_recovery_current_20261117` completed
+  **success**. Gold writer, active publication task, and all seven
+  confirmation tasks completed **success**.
+- Writer returned `PUBLISHED`; graph verification returned `VERIFIED`; all
+  seven physical readbacks returned `PASS`. Raw evidence is persisted at
+  `docs/evidence/gold-continuous-write-certification-20261117.json`.
+- WRITE flags were restored to disabled/`DRY_RUN` immediately afterward. No
+  cleanup, rollback, checkpoint reset, watermark reset, BI cutover, or
+  Iceberg cutover occurred.
+- Independent QA remains required before enabling the 15-minute schedule.
+
+## Continuous 15-minute Gold WRITE enablement — ACTIVE (2026-11-17)
+
+- Independent QA returned **PASS WITH WARNINGS**, with no Critical, High, or
+  Medium findings and no required code fixes. Warnings are limited to pytest
+  not being independently runnable in the reviewer environment and no
+  long-running HA certification yet.
+- After the controlled certification PASS, only the Airflow scheduler and DAG
+  processor were recreated with process-scoped WRITE guards.
+- Runtime verification: DAG is unpaused; Gold/ingestion WRITE is enabled with
+  production approval `1`; all six Iceberg cutover flags and
+  `BI_ACTIVE_PUBLISH_APPLY` remain false.
+- Schedule is `*/15 * * * *`, with `catchup=False` and
+  `max_active_runs=1`. The first observed scheduled run before final
+  enablement, `scheduled__2026-11-17T13:00:00+00:00`, completed `success`;
+  post-enablement long-running stability remains uncertified.
+- Continuous WRITE is now **ACTIVE** for the approved scope. Monitor the first
+  several intervals and revert to disabled/`DRY_RUN` on any partial-state or
+  verification failure. No BI consumer cutover or Iceberg cutover was enabled.
+
+## First post-enable scheduled run — FAIL-CLOSED / PAUSED (2026-11-17)
+
+- The first post-enable scheduled run,
+  `scheduled__2026-11-17T13:15:00+00:00`, failed at Gold preflight with
+  `Gold dimensional facts require current Silver PASS: customers`.
+- Six dimensional artifact tasks completed, but the scheduled window had no
+  new current `customers` Silver PASS artifact. Gold created no Spark,
+  MinIO, or Nessie client and performed no Gold mutation.
+- Per safety policy, the DAG was paused and scheduler/dag-processor were
+  recreated with all write flags disabled/`DRY_RUN`. Final verification:
+  `is_paused=true`, ingestion/write false, Gold disabled, production approval
+  empty, and lakehouse write false.
+- Continuous WRITE is now **PAUSED / NOT ACTIVE** pending a source/Silver
+  freshness strategy. Do not re-enable until scheduled runs can receive
+  current PASS artifacts for all six inputs or a separately certified
+  snapshot-reuse path is approved.
+
+## NO_CHANGE phase implementation evidence (2026-11-17)
+
+The approved implementation now resolves the six Silver artifact states using
+a deterministic JSON-safe preflight. All-six `NO_DATA` returns explicit
+`GOLD_NO_CHANGE/NO_CHANGE` and exits before Gold lineage/client creation;
+publication and confirmation are skipped without producing a write result.
+Mixed fact `NO_DATA` remains fail-closed, pinned customer/product snapshot
+reuse remains contract-preserving and disabled in production. This is static
+and unit-test evidence only; no runtime certification, DAG trigger, production
+WRITE, publication, cutover, or external-store mutation is claimed.
+## NO_CHANGE implementation QA closure (2026-11-17)
+
+- Implemented a pure JSON-safe effective-input resolver. All six explicit
+  Silver `NO_DATA` inputs now produce `GOLD_NO_CHANGE/NO_CHANGE` before Gold
+  client creation; no fake PASS, manifest, watermark, checkpoint or snapshot
+  is created.
+- Mixed fact `NO_DATA` remains fail-closed. Pinned customer/product snapshot
+  reuse remains explicit and production-disabled; no MinIO latest listing was
+  added.
+- Independent QA verdict: **PASS WITH WARNINGS**. No required code fix or
+  Critical/High/Medium/Low finding remains. Scoped independent tests: **74
+  passed**; compileall and `git diff --check` passed.
+- Warning: one unrelated full-suite test hit a shared pytest temp-directory
+  permission error, and runtime DAG/Spark/MinIO/Nessie validation is pending.
+- Current runtime remains safe: DAG paused, Gold/ingestion WRITE disabled,
+  `DRY_RUN`, no cutover or BI publication. Next step requires separate
+  approval for a controlled `DRY_RUN` validation of the NO_CHANGE path.
+
+## NO_CHANGE DRY_RUN defect correction QA closure (2026-11-17)
+
+- Controlled Gold-gated DRY_RUN found that DRY_RUN no-data artifacts use
+  `reason=DRY_RUN`; the resolver initially accepted only `reason=NO_DATA`.
+  The correction accepts both reasons and keeps mixed fact `NO_DATA`
+  fail-closed.
+- Independent QA verdict: **PASS WITH WARNINGS**; no required code fix and no
+  Critical/High/Medium/Low finding. Independent focused regression: **76
+  passed**; compileall and scoped diff-check passed.
+- The failed pre-fix DRY_RUN is defect-discovery evidence, not certification.
+  A new controlled Gold-gated DRY_RUN requires explicit approval. Runtime
+  remains paused/WRITE-disabled.
+
+## Gold-gated NO_CHANGE DRY_RUN runtime validation — PASS (2026-11-17)
+
+- After the correction and explicit approval, one read-only Gold-gated
+  DagRun completed **success**:
+  `manual__gold_no_change_gate_dry_run_fixed_20261117`.
+- Gold XCom explicitly returned `status=GOLD_NO_CHANGE` and
+  `reason=NO_CHANGE`; all six input states were `NO_DATA`.
+- `gold_dimensional_write` completed as a no-op; publication and all seven
+  confirmations were skipped. No Gold client/write, publication,
+  checkpoint/watermark mutation, cleanup, rollback, or cutover occurred.
+- Runtime flags were restored to disabled/`DRY_RUN` and the DAG was paused.
+- No-data runtime behavior is now validated. Mixed delta plus dimension
+  snapshot reuse and Production WRITE remain separately gated.
+## Pinned dimension snapshot reuse QA closure (2026-11-17)
+
+- Independent QA verdict: **PASS WITH WARNINGS**; no Critical, High, or Medium
+  finding and no required code fix.
+- Scoped independent tests passed: `64 passed` contract/orchestration,
+  `10 passed` selected Airflow parse/config, and `23 passed` selected
+  non-Spark writer tests. Compileall and diff-check passed.
+- Combined suite/runtime mixed-input validation remains incomplete. The
+  feature flag stays disabled and the DAG remains paused/WRITE-disabled.
+- Next gate: separately approve one bounded read-only DRY_RUN using pinned
+  dimension snapshot IDs and capture readback/schema/lineage evidence before
+  any Production WRITE or schedule enablement.
+
+## Pinned snapshot reuse runtime attempt — NOT CERTIFIED (2026-11-17)
+
+- The explicitly approved bounded runtime validation was attempted with
+  production WRITE/cutover disabled. The local Spark snapshot-reuse DRY_RUN
+  seam exceeded its bounded execution window without output and was stopped.
+- No DAG/data-store mutation, Gold WRITE, snapshot reuse enablement, cleanup,
+  rollback, or checkpoint/watermark mutation occurred. Runtime was restored to
+  paused/WRITE-disabled defaults.
+- Verdict: **NOT CERTIFIED** for actual mixed-input Spark/Nessie/MinIO snapshot
+  reuse. Static/contract QA remains PASS WITH WARNINGS; use a bounded
+  Linux/container Spark runtime before enabling the feature flag.
+
+## Bounded Linux Spark snapshot-reuse DRY_RUN — PASS (2026-11-17)
+
+- Approved bounded validation ran in `ecommerce-spark:3.5.6` with a
+  120-second timeout: `tests/test_gold_snapshot_reuse_dry_run.py` returned
+  **1 passed in 14.65s**.
+- This validates pinned dimension reuse, deterministic replay identity and
+  Gold DRY_RUN behavior in the Linux Spark runtime. No production snapshot
+  reuse flag, Gold WRITE, Iceberg/Nessie mutation or cutover was enabled.
+- Runtime remains paused/WRITE-disabled. Live production snapshot reuse still
+  needs explicit metadata provisioning and monitoring approval.
+
+## Metadata provisioning contract and QA closure (2026-11-17)
+
+- Added a pure verified registry contract for exactly the reusable
+  `customers`/`products` dimension snapshots, including canonical identity,
+  provenance, stale/future checks, production ref binding and fail-closed
+  validation before external execution.
+- Initial QA found and corrected registry propagation and `validate_config`
+  compatibility defects. Independent re-review: **PASS WITH WARNINGS**;
+  **127 passed**, compileall and diff-check passed.
+- Warning: a pure registry-only orchestration test for both dimensions is still
+  recommended. This phase has no runtime Spark/Iceberg/Nessie/MinIO
+  certification and does not provision production metadata.
+- Snapshot reuse, Gold WRITE, DAG schedule and cutover remain disabled/paused.
+  Next gate requires the regression test and separate explicit approval for a
+  bounded read-only DRY_RUN with verified pinned metadata.
+
+## Registry-only regression closure (2026-11-17)
+
+- Added and independently reviewed a registry-only test covering both
+  `customers` and `products` with `NO_DATA`, no inline snapshot artifacts,
+  exact artifact equality, and no Docker/runtime execution.
+- Final QA: **PASS WITH WARNINGS** with no findings or required fixes;
+  focused registry tests **3 passed, 40 deselected**, compileall and diff-check
+  passed.
+- The warning is only that the full suite was not run against the already dirty
+  worktree. This does not certify live Spark/Iceberg/Nessie/MinIO behavior.
+- Metadata provisioning static phase is complete. Runtime remains paused and
+  all snapshot-reuse/Gold WRITE flags remain disabled pending separate approval
+  for bounded DRY_RUN/live provisioning.
+
+## Bounded Spark DRY_RUN evidence (2026-11-17)
+
+- Explicitly approved bounded runtime executed in `ecommerce-spark:3.5.6` with
+  a 120-second timeout: `tests/test_gold_snapshot_reuse_dry_run.py` returned
+  **1 passed in 14.00s**.
+- The fixture runtime validated pinned-dimension merge planning, replay
+  identity and Gold DRY_RUN quality behavior without Iceberg/Nessie/MinIO/
+  PostgreSQL mutation, publication, checkpoint/watermark change or cutover.
+- Two pytest cache-permission warnings came from the read-only mounted
+  worktree; no test failure occurred. This is bounded fixture evidence, not
+  live `gold_prod_current` certification. Independent QA review remains open.
+
+### Bounded Spark DRY_RUN QA verdict — PASS WITH WARNINGS (2026-11-17)
+
+- Independent review found no Critical/High issue and confirmed the evidence
+  is correctly limited to the injected local Spark fixture seam.
+- Active `.env` and Compose defaults remain disabled/`DRY_RUN`; historical
+  `.env.backup-*` files contain enabled WRITE values but were not loaded or
+  modified. “Disabled” therefore refers to active runtime configuration only.
+- Live `gold_prod_current` Spark/Nessie/MinIO read-back certification remains
+  open; no production enablement or WRITE decision is made from this result.
+
+## Live pinned snapshot read-back attempt — NOT CERTIFIED (2026-11-17)
+
+- Deterministic MinIO manifest reads for the previously pinned customer/product
+  metadata passed identity/ref/schema/readback checks.
+- Read-only Spark access to Nessie/MinIO then rejected the exact pinned
+  customer snapshot because it no longer exists on `gold_prod_current`.
+- Diagnosis observed current state only: `dim_customer` snapshot
+  `2207301212624688080` with 6,226 rows and `dim_product` snapshot
+  `6280965936243979810` with 2,681 rows. These were not promoted or used as a
+  fallback.
+- Gate status: **NOT CERTIFIED** due stale pinned metadata. No mutation or flag
+  enablement occurred. A separately approved reprovisioning step is required
+  before another live read-back attempt.
+
+## Current snapshot provenance check — provisioning BLOCKED (2026-11-17)
+
+- Read-only Iceberg metadata shows the observed current snapshots were created
+  by `HistoricalGoldCandidateWriter` and lack the graph/manifest/schema/
+  readback identities required by the reusable production registry.
+- Their warehouse URI is `s3a://ecommerce-data-lake/...`, which does not match
+  the active production `BRONZE_BUCKET=ecommerce-lakehouse-prod` configuration.
+- No registry or DagRun metadata was provisioned from these snapshots. The
+  historical candidate state is not a valid production reuse source and was not
+  used as fallback.
+- The next gate is a new Gold baseline with persisted v2 provenance on the
+  intended production warehouse/ref, followed by validation and read-only
+  pinned read-back.

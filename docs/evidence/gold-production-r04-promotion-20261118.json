@@ -1,0 +1,18 @@
+{
+  "status": "PROMOTED_AND_VERIFIED",
+  "candidate_ref": "gold_prod_candidate_v2_cert_20261118_r04",
+  "candidate_hash": "a94321570216b4cfae1e81306400c063bccdb82177242722f2c165289569c6a5",
+  "stable_ref": "gold_prod_current",
+  "expected_stable_hash_before_cas": "a4274ec5b703fc37a34ecb8efab17931773aa82987e37ca324a7c798cbfb59e7",
+  "stable_hash_after_cas": "a94321570216b4cfae1e81306400c063bccdb82177242722f2c165289569c6a5",
+  "post_promotion_readback": "PASS",
+  "tables": 7,
+  "continuous_write": {
+    "dag_id": "ecommerce_incremental_ingestion",
+    "schedule": "*/15 * * * *",
+    "max_active_runs": 1,
+    "paused": false,
+    "gold_mode": "WRITE",
+    "bi_active_publish_apply": false
+  }
+}

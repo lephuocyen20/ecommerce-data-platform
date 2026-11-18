@@ -50,19 +50,27 @@ Metabase.
 
 ## Implementation evidence
 
+- `NessieRestAdapter.get_ref` accepts the Nessie v2 `{"reference": {"name", "hash", "type"}}` GET envelope, preserves top-level response compatibility, and validates reference identity, hash and type fail-closed.
+- Focused Nessie reference regression: `tests/test_bi_ref_promotion.py` (`22 passed`); nested-envelope case isolated: `1 passed`. `compileall` and `git diff --check`: PASS.
 - `NessieRestAdapter.update_branch` adds expected-hash CAS advancement for the
-  stable `bi_gold_current` branch.
+  stable `bi_gold_current` branch using Nessie v2's canonical
+  `ref@expectedHash` path form.
 - `publish_gold_to_active_task` is inserted between Gold writer verification
   and table confirmation tasks. It requires certified `WRITE` evidence,
   `BI_ACTIVE_PUBLISH_APPLY=1`, and `BI_GOLD_CURRENT_EXPECTED_HASH`.
+- The publish boundary normalizes `DockerOperator` XCom log lists by extracting
+  the canonical `GOLD_DIMENSIONAL_RESULT` JSON, while rejecting missing or
+  invalid writer evidence.
 - Shared-bucket candidates use the stable active namespace
   `gold_run_20261112_gold_06` while retaining run-scoped warehouse/ref
   isolation; quality-it runs never publish to the active branch.
 - Candidate publication evidence validates the exact bounded bucket, prefix,
   run ID, candidate ref, seven-table set, positive snapshot IDs and read-back
   `PASS` status before any branch update is attempted.
-- Focused implementation suite: **55 passed**; `compileall` and
+- Focused implementation suite: **56 passed**; `compileall` and
   `git diff --check`: **PASS**.
+- XCom boundary regression suite: **18 passed**; it covers list, direct-dict,
+  missing-result and invalid-JSON writer outputs.
 - No runtime write, Nessie branch update, MinIO mutation, database mutation or
   Metabase cutover was executed.
 

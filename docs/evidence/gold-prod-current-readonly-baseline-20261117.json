@@ -1,0 +1,45 @@
+{
+  "evidence_kind": "gold_prod_current_readonly_baseline",
+  "captured_on": "2026-11-17",
+  "status": "OBSERVED_READONLY_NOT_CERTIFIED",
+  "catalog": "lakehouse",
+  "namespace": "gold",
+  "ref": "gold_prod_current",
+  "source": {
+    "spark_container": "ecommerce-spark",
+    "operation": "Spark Iceberg load with explicit snapshot-id and .files readback",
+    "writes_performed": false,
+    "publication_or_cutover": false
+  },
+  "tables": {
+    "dim_customer": {
+      "snapshot_id": 2207301212624688080,
+      "columns": ["customer_key", "customer_id", "full_name", "email", "created_at", "updated_at"],
+      "row_count": 6226,
+      "file_count": 2,
+      "file_bytes": 131997,
+      "read_status": "PASS",
+      "manifest_key": "gold/dimensional/tables/v1/07ecf77a3ab8a9a54133f1e864377bbf7c897fae4174028350bf86f89938ebc4/dim_customer.json",
+      "manifest_identity_observed": "de7d44007cf550988cd28605fd5553ca6282d6046c7a8432dd8cd82523688c75"
+    },
+    "dim_product": {
+      "snapshot_id": 6280965936243979810,
+      "columns": ["product_key", "product_id", "product_name", "stock_quantity", "price", "created_at", "updated_at"],
+      "row_count": 2681,
+      "file_count": 2,
+      "file_bytes": 49680,
+      "read_status": "PASS",
+      "manifest_key": "gold/dimensional/tables/v1/07ecf77a3ab8a9a54133f1e864377bbf7c897fae4174028350bf86f89938ebc4/dim_product.json",
+      "manifest_identity_observed": "3a91551d6e3e0628986888bfcfa13141fb9222a71e152e7afa61762b4f5fda1d"
+    }
+  },
+  "certification_gaps": [
+    "persisted_schema_identity",
+    "persisted_graph_identity_bound to each table",
+    "persisted_stale_policy",
+    "persisted_ref_bound_readback_identity",
+    "complete_seven_table_graph_runtime_evidence",
+    "Silver_lineage_quality_and_reconciliation_binding"
+  ],
+  "certification_decision": "DO_NOT_CERTIFY_OR_CREATE_CANDIDATE"
+}
