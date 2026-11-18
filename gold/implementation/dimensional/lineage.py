@@ -261,7 +261,7 @@ def build_parquet_lineage_artifact(*, table, bucket, manifest_key, data_prefix, 
         source["bronze_batch_id"] = bronze_batch_id
     if coverage is not None:
         source["coverage"] = coverage
-    artifact = {"status": "PASS", "parquet_lineage": source}
+    artifact = {"status": "PASS", "table_name": table, "parquet_lineage": source}
     if legacy_coverage_compatibility:
         artifact["legacy_coverage_compatibility"] = True
     return artifact

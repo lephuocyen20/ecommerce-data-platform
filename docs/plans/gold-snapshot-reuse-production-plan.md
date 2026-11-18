@@ -444,3 +444,58 @@ PostgreSQL behavior remains **NOT RUNTIME CERTIFIED**.
   performed. Runtime certification remains open.
 - QA handoff: independently review only this correction diff against the
   initial FAIL findings above; production snapshot reuse remains disabled.
+
+### Lineage artifact contract regression evidence (2026-11-18)
+
+- Approved patch adds the required top-level `table_name` to
+  `build_parquet_lineage_artifact()` while preserving nested `parquet_lineage`.
+- Added regressions verify six builder-generated `PASS` artifacts resolve to
+  `GOLD_READY`, and a top-level table mismatch is rejected fail-closed.
+- Targeted suite: **66 passed in 0.15s**:
+  `tests/test_gold_dimensional_lineage.py` and
+  `tests/test_gold_snapshot_reuse_contract.py`.
+- `git diff --check`: **exit 0**. No Airflow trigger/retry, external-service
+  test, DB/MinIO/Nessie write, snapshot mutation, or cutover was performed.
+- QA handoff: review the one-line implementation contract change and the two
+  local regression cases. Runtime certification remains unchanged/open.
+
+### Independent QA closure for lineage artifact contract (2026-11-18)
+
+- QA verdict: **PASS WITH WARNINGS**.
+- The implementation and resolver contract passed review; `snapshot_reuse.py`
+  was unchanged and no runtime/external write was performed.
+- Targeted local evidence: **66 passed in 0.11s** and `git diff --check`
+  passed.
+- Reproducibility warning accepted for this repository: `tests/` is intentionally
+  ignored by `.gitignore`, so the regression cases are local-only evidence and
+  are not part of the tracked patch. This does not change the runtime scope.
+- Exact next step: rerun one controlled positive-delta DagRun with the same
+  source delta and explicit `WRITE` conf; verify Gold result/readback, lock
+  release evidence, and that BI active publication remains disabled.
+
+### Controlled positive-delta runtime verification (2026-11-18)
+
+- A fresh bounded source delta was generated after the earlier failed run;
+  no rows were deleted or rolled back.
+- DagRun `manual__positive_delta_fix__20261118T154500Z` used explicit
+  `{"mode":"WRITE","tables":["customers","products","orders","payments","shipments","order_items"]}`
+  and finished **success**.
+- All six ingestion, Silver verification and dimensional artifact tasks
+  completed successfully. `gold_dimensional_write` completed successfully.
+- Gold writer evidence: `mode=WRITE`, `status=PUBLISHED`,
+  `verification_status=VERIFIED`, `readback_complete=true`; all seven Gold
+  tables reported `readback_status=PASS`.
+- Runtime guards were verified as `GOLD_DIMENSIONAL_MODE=WRITE`,
+  `GOLD_DIMENSIONAL_WRITE_ENABLED=true`, `INGESTION_WRITE_ENABLED=true`,
+  and `PRODUCTION_LAKEHOUSE_WRITE_APPROVED=1`.
+- Active BI publication remained disabled: `BI_ACTIVE_PUBLISH_APPLY=0`;
+  `publish_gold_to_active` returned `SKIPPED` and did not promote the active
+  consumer route.
+- The previously observed `Malformed Silver artifact state` did not recur;
+  no retry of the failed run, checkpoint reset, cleanup, or destructive
+  maintenance was performed.
+- Runtime positive-delta acceptance is **PASS WITH WARNINGS**: Gold write and
+  readback are certified for this run, while tests remain local-only because
+  `tests/` is intentionally ignored and active BI publication remains off.
+- Exact next step: user approval is required before committing or pushing the
+  implementation and plan changes.
