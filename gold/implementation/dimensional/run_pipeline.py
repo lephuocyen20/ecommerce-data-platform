@@ -150,6 +150,28 @@ def require_verified_graph(verification):
     return verification
 
 
+def read_production_candidate_hash(candidate_ref):
+    """Read back the production candidate BRANCH hash without mutating Nessie."""
+    from gold.implementation.bi_ref_promotion import NessieRestAdapter
+
+    nessie_uri = os.environ.get("NESSIE_URI")
+    if not nessie_uri:
+        raise RuntimeError("Production Gold WRITE requires NESSIE_URI for candidate hash read-back")
+    reference = NessieRestAdapter(nessie_uri).get_ref(candidate_ref)
+    if reference.name != candidate_ref or reference.ref_type != "BRANCH":
+        raise RuntimeError("Production Gold WRITE requires the candidate Nessie BRANCH")
+    return reference.hash
+
+
+def _runtime_nessie_ref(*, scope, production_ref, is_production):
+    """Resolve the ref used by runtime evidence without weakening production guards."""
+    if scope is not None:
+        return scope.nessie_ref
+    if is_production:
+        return production_ref
+    return os.environ.get("NESSIE_REF") or "main"
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
     storage_environment = dict(os.environ)
@@ -221,6 +243,9 @@ def main(argv=None):
         validate_dimensional_lineage(lineage, scope=scope)
     else:
         raise SystemExit("One of --source-lineage or --source-artifact is required")
+    runtime_nessie_ref = _runtime_nessie_ref(
+        scope=scope, production_ref=production_ref, is_production=layout.is_production,
+    )
     spark = None
     started_at = datetime.now(timezone.utc)
     try:
@@ -244,11 +269,7 @@ def main(argv=None):
             dim_date_start=args.dim_date_start, dim_date_end=args.dim_date_end, mode=args.mode, scope=scope,
             merge_plan=merge_plan,
             captured_at=started_at,
-            nessie_ref=(
-                scope.nessie_ref if scope is not None
-                else production_ref if layout.is_production
-                else os.environ.get("NESSIE_REF")
-            ),
+            nessie_ref=runtime_nessie_ref,
         )
         result["mode"] = args.mode
         if args.mode == WRITE:
@@ -257,6 +278,8 @@ def main(argv=None):
                 result, create_minio_client(), args.bucket, scope=scope,
             )
             result["verification"] = require_verified_graph(verification)
+            if layout.is_production:
+                production_evidence["candidate_hash"] = read_production_candidate_hash(production_ref)
         result["certification_report"] = build_certification_report(
             run_id=os.environ.get("LAKEHOUSE_E2E_RUN_ID", "local"),
             code_identity=os.environ.get("GIT_COMMIT_SHA", "unknown"),
@@ -264,11 +287,7 @@ def main(argv=None):
             lineage_identity=dimensional_lineage_identity(lineage, scope=scope),
             bucket=args.bucket,
             prefix=scope.prefix if scope is not None else None,
-            ref=(
-                scope.nessie_ref if scope is not None
-                else production_ref if layout.is_production
-                else os.environ.get("NESSIE_REF")
-            ),
+            ref=runtime_nessie_ref,
             writer_result=result,
             verification=result.get("verification"),
             client=minio_client,

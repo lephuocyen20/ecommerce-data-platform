@@ -400,3 +400,137 @@ full rebuild/migration is still required before BI consumer cutover**.
   `fact_shipments=24596`.
 - The earlier error was from a stale startup-era query; the current Nessie
   branch and production-bucket metadata are readable by BI.
+## QA correction plan — publish identity and low-level scope guards
+
+### Scope
+
+Correct the independent QA findings from the review of commits `d1980b9`,
+`8a45dcf`, and `4662851`:
+
+1. Preserve the certification `candidate_hash` and compare it with the current
+   Nessie candidate branch hash; never rebind the report to the branch HEAD.
+2. Require `report.candidate_ref` to equal the configured
+   `GOLD_CANDIDATE_REF` before any promotion client operation.
+3. Make `ProductionGoldScope` and the low-level dimensional writer reject an
+   invalid production bucket, candidate ref, or namespace even when called
+   outside the CLI/Airflow boundary.
+4. Add regression tests for hash mismatch, candidate-ref mismatch, and unsafe
+   direct scope construction. Tests remain local-only and are not committed,
+   consistent with the repository test-folder policy.
+
+### Acceptance criteria
+
+- A stale or mismatched certification hash fails closed before production ref
+  promotion.
+- A candidate ref mismatch between environment and certification fails closed.
+- `ProductionGoldScope` rejects `main`, `gold_prod_current`, arbitrary refs,
+  and non-certified namespaces for production WRITE.
+- Targeted tests pass and changed Python files compile.
+- No DAG trigger, Nessie/MinIO/PostgreSQL mutation, BI cutover, commit, or push
+  occurs until independent QA passes.
+
+### Verification
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q --basetemp .pytest-tmp-focused `
+  tests/test_bi_ref_promotion.py tests/test_gold_dimensional_writer.py `
+  tests/test_gold_dimensional_verification.py tests/test_storage_layout.py
+.\.venv\Scripts\python.exe -m compileall -q airflow common gold
+git diff --check
+```
+
+### Status
+
+- Approved by user in chat.
+- Implementation correction round 1 complete; targeted local verification
+  passed, but QA round 2 found a producer/consumer contract gap.
+- QA round 2: **FAIL**. Consumer-side hash preservation and scope guards
+  passed, but the production certification producer did not emit
+  `candidate_hash`, so every real production promotion would fail closed.
+  Existing tests used a hand-built report and did not cover producer-to-
+  consumer wiring.
+- Correction round 2 scope: read back the candidate branch hash from Nessie
+  after the WRITE graph completes and include it in the production
+  certification report; add producer-to-consumer regression coverage without
+  overwriting the report in the publish task.
+- Independent QA required again after correction.
+- QA round 3: **PASS WITH WARNINGS**. Producer-to-consumer hash lineage,
+  candidate binding, and low-level scope guards passed independent review.
+  Targeted suites passed (`67 passed`), compileall and diff-check passed.
+  Warning: two existing quality-it orchestration tests fail because their
+  fixture omits `NESSIE_REF`, and the full suite was not completed.
+- Follow-up correction: preserve the non-production fallback ref for test and
+  quality-it orchestration paths without weakening production guards; rerun the
+  two affected tests and update this plan before commit.
+- QA round 4: **PASS WITH WARNINGS**. Independent review found no Critical,
+  High, or Medium issue. The candidate hash producer/consumer chain,
+  candidate-ref binding, production scope guards, bounded immutability and
+  non-production `main` fallback passed review. Evidence: `117 passed` plus
+  `50 passed`, AST/compile checks and `git diff --check` passed.
+- Remaining warnings: full repository pytest was not completed, production
+  Spark/Nessie/MinIO certification was not run, and local pytest artifacts must
+  not be committed.
+- Next step: commit the correction after excluding generated pytest artifacts;
+  keep runtime production publish/cutover behind its existing approval gate.
+
+## Runtime certification and cutover execution request
+
+- User explicitly requested production runtime certification and production
+  cutover/publish.
+- Certification scope: read-only Spark/Nessie/MinIO validation of the current
+  certified seven-table Gold graph, candidate branch identity, manifest/hash
+  parity, schema and row-count readback, rollback metadata, and BI consumer
+  smoke query.
+- Cutover scope: only the guarded `gold_prod_current` CAS promotion from the
+  verified production candidate, with the exact expected current hash and
+  `PRODUCTION_LAKEHOUSE_WRITE_APPROVED=1`; no data cleanup, checkpoint reset,
+  rollback, compaction, snapshot expiry or orphan removal.
+- Preflight must stop if the candidate hash, stable hash, candidate ref,
+  catalog/schema, rollback hash/owner or approval flags do not match the
+  certified plan. Runtime evidence will be recorded after execution.
+
+## Runtime certification and cutover result (2026-11-19)
+
+- Preflight matched the approved production contract: bucket
+  `ecommerce-lakehouse-prod`, stable ref `gold_prod_current`, candidate ref
+  `gold_prod_candidate_bi_20261119_r05`, catalog `lakehouse`, schema
+  `gold_run_20261112_gold_06`, production approval flags enabled, and rollback
+  hash/owner present.
+- Nessie read-only GET confirmed stable and candidate are both BRANCH refs at
+  hash `0a2ae6cb10d44b1508d8f212dceccbbe9f1a70fe8b2e269c58de26c427eb74bd`.
+- Spark 3.5.6 read-only certification through Nessie and MinIO completed with
+  all seven tables readable and counts matching the certified baseline:
+  `dim_date=762`, `dim_customer=6236`, `dim_product=2691`,
+  `fact_orders=26714`, `fact_order_items=80318`, `fact_payments=33768`,
+  `fact_shipments=24596`.
+- Cutover result: **APPLY_NOOP / already active**. The guarded production
+  promotion had no state change to perform because `gold_prod_current` already
+  pointed to the exact verified candidate hash. No Nessie update, Iceberg write,
+  cleanup, checkpoint reset or rollback was executed.
+- Trino and Metabase read-only smoke remained PASS after certification; no
+  active consumer cutover was required beyond the already-active stable ref.
+
+### QA round 3 follow-up implementation (2026-11-19)
+
+- Approved scope was limited to the two quality-it orchestration failures where
+  an omitted `NESSIE_REF` reached certification as `None`.
+- The runner now resolves one runtime ref for graph execution and certification:
+  bounded scope ref first, production candidate ref second, and `main` only for
+  non-production unscoped execution when `NESSIE_REF` is absent.
+- Production `NESSIE_REF=gold_prod_current`, candidate hash read-back,
+  production approval, namespace and candidate guards remain unchanged.
+- Regression coverage asserts the quality-it DRY_RUN certification ref is
+  `main`; the companion WRITE test exercises the same fallback path.
+- No DAG, Spark runtime, MinIO/Nessie/PostgreSQL service, external mutation,
+  Iceberg cutover, checkpoint/watermark change, or commit was performed.
+- Verification evidence: the two affected tests passed (`2 passed`); full
+  orchestration plus publish-XCom tests passed (`50 passed`); targeted
+  producer/publish, writer, verification and storage-layout suites passed
+  (`93 passed`) when using a workspace-local pytest `--basetemp`.
+- `compileall -q airflow common gold tests` passed and `git diff --check`
+  passed. The first targeted invocation hit three pytest temp-directory
+  `PermissionError`s under the default user temp root; no test assertion or
+  implementation failure was involved, and the rerun with local `--basetemp`
+  was fully green.
+- Implementation handoff is ready for independent QA; no runtime certification
+  or production enablement is claimed.

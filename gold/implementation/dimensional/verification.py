@@ -13,7 +13,7 @@ class DimensionalVerificationError(ValueError):
 
 def build_certification_report(*, run_id, code_identity, config_identity, lineage_identity,
                                bucket, prefix, ref, writer_result, verification=None, client=None, scope=None,
-                               now=None, candidate_ref=None, catalog=None, schema=None):
+                               now=None, candidate_ref=None, candidate_hash=None, catalog=None, schema=None):
     """Build a deterministic, read-only certification record from runtime evidence.
 
     This function performs no Spark, database, or network calls.  The
@@ -125,6 +125,8 @@ def build_certification_report(*, run_id, code_identity, config_identity, lineag
     }
     if candidate_ref is not None:
         report["candidate_ref"] = candidate_ref
+    if candidate_hash is not None:
+        report["candidate_hash"] = candidate_hash
     if catalog is not None:
         report["catalog"] = catalog
     if schema is not None:

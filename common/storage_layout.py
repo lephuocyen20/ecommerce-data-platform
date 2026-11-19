@@ -16,6 +16,7 @@ from common.bounded_e2e_scope import TEST_BUCKET, BoundedE2EScope, build_bounded
 PRODUCTION_BUCKET = "ecommerce-lakehouse-prod"
 QUALITY_BUCKET = "ecommerce-lakehouse-quality-it"
 PRODUCTION_REF = "gold_prod_current"
+PRODUCTION_GOLD_NAMESPACE = "gold_run_20261112_gold_06"
 LEGACY_LAYOUT = "legacy"
 PRODUCTION_LAYOUT = "production"
 QUALITY_LAYOUT = "quality-it"
@@ -72,6 +73,18 @@ class ProductionGoldScope:
     target_namespace: str
     prefix: str = ""
 
+    def __post_init__(self):
+        if self.bucket != PRODUCTION_BUCKET:
+            raise StorageLayoutError("Production Gold scope must use ecommerce-lakehouse-prod")
+        if not is_production_candidate_ref(self.candidate_ref):
+            raise StorageLayoutError("Production Gold scope requires a strict gold_prod_candidate ref")
+        if self.target_namespace != PRODUCTION_GOLD_NAMESPACE:
+            raise StorageLayoutError(
+                "Production Gold scope requires namespace gold_run_20261112_gold_06"
+            )
+        if self.prefix != "":
+            raise StorageLayoutError("Production Gold scope cannot use an object prefix")
+
     @property
     def warehouse(self):
         return f"s3a://{self.bucket}/lakehouse"
@@ -114,6 +127,10 @@ def _production_flags_present(environ):
 
 def is_production_ref(value):
     return value == PRODUCTION_REF or bool(_PRODUCTION_REF.fullmatch(value or ""))
+
+
+def is_production_candidate_ref(value):
+    return bool(_PRODUCTION_REF.fullmatch(value or "")) and value.startswith("gold_prod_candidate_")
 
 
 def validate_storage_environment(environ=None) -> StorageLayout:
@@ -175,9 +192,9 @@ def gold_table_key(table_name, suffix="", *, layout=None, environ=None):
 
 
 __all__ = [
-    "LEGACY_LAYOUT", "PRODUCTION_BUCKET", "PRODUCTION_LAYOUT", "PRODUCTION_REF",
+    "LEGACY_LAYOUT", "PRODUCTION_BUCKET", "PRODUCTION_GOLD_NAMESPACE", "PRODUCTION_LAYOUT", "PRODUCTION_REF",
     "QUALITY_BUCKET", "QUALITY_LAYOUT", "ProductionGoldScope", "StorageLayout", "StorageLayoutError",
     "bronze_table_key", "build_layer_key", "gold_table_key", "silver_table_key",
     "validate_storage_environment",
-    "is_production_ref",
+    "is_production_ref", "is_production_candidate_ref",
 ]

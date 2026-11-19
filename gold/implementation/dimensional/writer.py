@@ -21,6 +21,12 @@ from .reader import read_dimensional_sources
 from .transformations import build_dim_customer, build_dim_date, build_dim_product, build_fact_orders, build_fact_order_items, build_fact_payments, build_fact_shipments
 from .snapshot_reuse import GOLD_SNAPSHOT_REUSE, SnapshotReuseContractError, snapshot_reuse_enabled, validate_incremental_merge_plan
 from common.bounded_e2e_scope import TEST_BUCKET
+from common.storage_layout import (
+    PRODUCTION_BUCKET,
+    PRODUCTION_GOLD_NAMESPACE,
+    ProductionGoldScope,
+    is_production_candidate_ref,
+)
 
 DRY_RUN = "DRY_RUN"
 WRITE = "WRITE"
@@ -55,6 +61,19 @@ def assert_write_allowed(mode, *, write_guard=None):
                 raise DimensionalWriteError("WRITE requires an approved dimensional write guard")
         elif os.getenv("GOLD_DIMENSIONAL_WRITE_ENABLED", "false").lower() != "true":
             raise DimensionalWriteError("WRITE requires GOLD_DIMENSIONAL_WRITE_ENABLED=true")
+
+
+def _validate_production_write_scope(bucket, scope, effective_ref):
+    if bucket != PRODUCTION_BUCKET:
+        return
+    if not isinstance(scope, ProductionGoldScope):
+        raise DimensionalWriteError("Production Gold WRITE requires an explicit ProductionGoldScope")
+    if scope.bucket != PRODUCTION_BUCKET or scope.gold_namespace != PRODUCTION_GOLD_NAMESPACE:
+        raise DimensionalWriteError("Production Gold WRITE requires the certified Gold scope")
+    if not is_production_candidate_ref(scope.candidate_ref):
+        raise DimensionalWriteError("Production Gold WRITE requires a strict gold_prod_candidate ref")
+    if effective_ref != scope.candidate_ref:
+        raise DimensionalWriteError("Production Gold WRITE Nessie ref must match the candidate scope")
 
 
 def create_target_table(spark, table, scope=None):
@@ -225,11 +244,15 @@ def run_dimensional_graph(spark, client, bucket, lineage, *, dim_date_start, dim
         raise DimensionalWriteError("ecommerce-data-lake WRITE requires a validated bounded E2E scope")
     if scope is not None and bucket != scope.bucket:
         raise DimensionalWriteError("E2E scope bucket does not match writer bucket")
+    if mode == WRITE and scope is not None and nessie_ref is not None and nessie_ref != scope.nessie_ref:
+        raise DimensionalWriteError("Production Gold WRITE Nessie ref must match the candidate scope")
     effective_ref = scope.nessie_ref if scope is not None else nessie_ref
     if not isinstance(bucket, str) or not bucket:
         raise DimensionalWriteError("Writer requires an explicit runtime bucket")
     if mode == WRITE and (not isinstance(effective_ref, str) or not effective_ref):
         raise DimensionalWriteError("Writer requires an explicit runtime Nessie ref")
+    if mode == WRITE:
+        _validate_production_write_scope(bucket, scope, effective_ref)
     validate_cross_table_coverage(lineage)
     historical_coverage = configured_date_start is not None or configured_date_end is not None
     sources = None

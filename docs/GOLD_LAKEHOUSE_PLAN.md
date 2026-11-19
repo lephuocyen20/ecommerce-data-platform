@@ -2207,3 +2207,28 @@ WRITE, publication, cutover, or external-store mutation is claimed.
 - The next gate is a new Gold baseline with persisted v2 provenance on the
   intended production warehouse/ref, followed by validation and read-only
   pinned read-back.
+
+## QA closure note — production publish identity correction (2026-11-19)
+
+- Independent QA round 4: **PASS WITH WARNINGS** for the correction diff.
+- Candidate hash lineage, candidate ref binding, production scope guards and
+  non-production ref fallback passed; targeted evidence was `117 passed` plus
+  `50 passed`, with AST/compile and diff checks passing.
+- This is code-level QA only. It does not certify a live Spark/Nessie/MinIO
+  production publish or consumer cutover. Generated pytest artifacts are local
+  only and must not be committed.
+
+## Production runtime certification and cutover (2026-11-19)
+
+- Spark 3.5.6 read-only certification through Nessie and MinIO passed for all
+  seven production Gold tables; counts were `762 / 6236 / 2691 / 26714 /
+  80318 / 33768 / 24596` in registry order.
+- Nessie confirmed `gold_prod_current` and
+  `gold_prod_candidate_bi_20261119_r05` both point to the verified hash
+  `0a2ae6cb10d44b1508d8f212dceccbbe9f1a70fe8b2e269c58de26c427eb74bd`.
+- Guarded cutover outcome: **APPLY_NOOP / already active**. No additional
+  Nessie mutation was needed or performed because stable already equals the
+  certified candidate. This certifies read access and active-ref parity, not a
+  new write event.
+- Production runtime is certified for the read-only state and active stable
+  ref; future WRITE/cutover still requires the existing explicit gate.

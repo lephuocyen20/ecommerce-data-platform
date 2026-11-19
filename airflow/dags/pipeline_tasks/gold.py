@@ -262,6 +262,7 @@ def publish_gold_to_active_task(writer_result):
     from gold.implementation.bi_ref_promotion import advance_stable_branch
     from gold.implementation.bi_ref_promotion import candidate_from_certification
     from gold.implementation.bi_ref_promotion import production_candidate_from_certification
+    from gold.implementation.bi_ref_promotion import validate_production_candidate_ref
     bucket = os.environ.get("BRONZE_BUCKET")
     if bucket == PRODUCTION_BUCKET:
         from common.storage_layout import validate_storage_environment
@@ -272,22 +273,17 @@ def publish_gold_to_active_task(writer_result):
         production_config = validate_production_publish_config(os.environ)
         if os.environ.get("PRODUCTION_LAKEHOUSE_WRITE_APPROVED") != "1":
             raise RuntimeError("PRODUCTION_LAKEHOUSE_WRITE_APPROVED=1 is required for production publication")
-        adapter = NessieRestAdapter(os.environ["NESSIE_URI"])
         candidate_ref = report.get("candidate_ref")
-        if not isinstance(candidate_ref, str):
-            raise RuntimeError("Production certification must contain explicit candidate_ref")
+        configured_candidate_ref = os.environ.get("GOLD_CANDIDATE_REF")
+        if not isinstance(candidate_ref, str) or candidate_ref != configured_candidate_ref:
+            raise RuntimeError("Production certification candidate_ref must match GOLD_CANDIDATE_REF")
+        validate_production_candidate_ref(configured_candidate_ref)
+        adapter = NessieRestAdapter(os.environ["NESSIE_URI"])
         candidate_reference = adapter.get_ref(candidate_ref)
-        candidate_hash = candidate_reference.hash
-        # Bind the certification to the read-back candidate HEAD immediately
-        # before validation.  The writer certifies table/manifest evidence but
-        # cannot know the final Nessie commit hash until Spark has committed;
-        # promotion must validate the hash observed from Nessie, not a missing
-        # or stale value in the serialized writer report.
-        report = {**report, "candidate_hash": candidate_hash}
         manifest = production_candidate_from_certification(
             report,
             candidate_ref=candidate_ref,
-            candidate_hash=candidate_hash,
+            candidate_hash=report.get("candidate_hash"),
             nessie_reference=candidate_reference,
             catalog=production_config["catalog"],
             schema=production_config["schema"],
