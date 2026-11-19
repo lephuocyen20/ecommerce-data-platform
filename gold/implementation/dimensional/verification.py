@@ -13,7 +13,7 @@ class DimensionalVerificationError(ValueError):
 
 def build_certification_report(*, run_id, code_identity, config_identity, lineage_identity,
                                bucket, prefix, ref, writer_result, verification=None, client=None, scope=None,
-                               now=None):
+                               now=None, candidate_ref=None, catalog=None, schema=None):
     """Build a deterministic, read-only certification record from runtime evidence.
 
     This function performs no Spark, database, or network calls.  The
@@ -22,7 +22,7 @@ def build_certification_report(*, run_id, code_identity, config_identity, lineag
     """
     if not all(isinstance(value, str) and value for value in (run_id, code_identity, config_identity, lineage_identity, bucket, ref)):
         raise DimensionalVerificationError("Certification identity fields are required")
-    if prefix is not None and (not isinstance(prefix, str) or not prefix.endswith("/")):
+    if prefix is not None and (not isinstance(prefix, str) or (prefix and not prefix.endswith("/"))):
         raise DimensionalVerificationError("Certification prefix must be empty or slash-terminated")
     result = parse_writer_result(writer_result)
     graph = result.get("graph")
@@ -102,7 +102,7 @@ def build_certification_report(*, run_id, code_identity, config_identity, lineag
         and output_by_table[table]["manifest"].get("version") == 2
         for table in WRITE_ORDER
     ) if status != "PARTIAL_REQUIRES_RECONCILIATION" else False
-    return {
+    report = {
         "kind": "gold_dimensional_runtime_certification",
         "version": 1,
         "run_id": run_id,
@@ -123,6 +123,13 @@ def build_certification_report(*, run_id, code_identity, config_identity, lineag
         "mode": result.get("mode", "DRY_RUN"),
         "can_write": False if result.get("mode", "DRY_RUN") == "DRY_RUN" else certified,
     }
+    if candidate_ref is not None:
+        report["candidate_ref"] = candidate_ref
+    if catalog is not None:
+        report["catalog"] = catalog
+    if schema is not None:
+        report["schema"] = schema
+    return report
 
 
 def _validate_reusable_manifest(manifest, table, readback, graph_identity, *, now):

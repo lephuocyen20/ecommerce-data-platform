@@ -58,7 +58,7 @@ def build_graph_manifest(lineage, *, dim_date_start, dim_date_end, scope=None,
 
 
 def build_table_manifest(graph, *, table, snapshot_id, quality, catalog=DIMENSIONAL_CATALOG,
-                         namespace=DIMENSIONAL_NAMESPACE, ref="main", stale_policy=None,
+                         namespace=DIMENSIONAL_NAMESPACE, ref=None, stale_policy=None,
                          captured_at=None):
     if table not in WRITE_ORDER or not isinstance(snapshot_id, int) or snapshot_id <= 0:
         raise DimensionalManifestError("Invalid table manifest")

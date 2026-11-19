@@ -16,7 +16,7 @@ from pyspark.sql import SparkSession
 
 from common.minio import configure_s3a, create_minio_client
 from common.bounded_e2e_scope import BoundedE2EScopeError, build_bounded_e2e_scope
-from common.storage_layout import validate_storage_environment
+from common.storage_layout import ProductionGoldScope, validate_storage_environment
 from gold.implementation.run_metadata import build_runtime_dimensional_metadata
 from gold.implementation.run_metadata_repository import persist_if_enabled
 from gold.implementation.dimensional.lineage import validate_dimensional_lineage, dimensional_lineage_identity
@@ -180,6 +180,33 @@ def main(argv=None):
             raise SystemExit("--nessie-ref must match the immutable E2E scope")
     elif args.warehouse or args.nessie_ref:
         raise SystemExit("Scoped warehouse/ref require ecommerce-data-lake")
+    production_evidence = {}
+    production_ref = None
+    if layout.is_production:
+        from gold.implementation.bi_ref_promotion import (
+            PRODUCTION_CATALOG,
+            PRODUCTION_SCHEMA,
+            validate_production_candidate_ref,
+        )
+
+        candidate_ref = validate_production_candidate_ref(os.environ.get("GOLD_CANDIDATE_REF"))
+        production_ref = candidate_ref
+        if args.mode == WRITE:
+            if os.environ.get("NESSIE_REF") != "gold_prod_current":
+                raise SystemExit("Production Gold WRITE requires explicit NESSIE_REF=gold_prod_current")
+        catalog = os.environ.get("GOLD_TARGET_CATALOG")
+        schema = os.environ.get("GOLD_TARGET_NAMESPACE")
+        if args.mode == WRITE and (catalog != PRODUCTION_CATALOG or schema != PRODUCTION_SCHEMA):
+            raise SystemExit(
+                "Production Gold WRITE requires explicit GOLD_TARGET_CATALOG=lakehouse "
+                "and GOLD_TARGET_NAMESPACE=gold_run_20261112_gold_06"
+            )
+        scope = ProductionGoldScope(
+            bucket=layout.bucket,
+            candidate_ref=candidate_ref,
+            target_namespace=schema,
+        )
+        production_evidence = {"candidate_ref": candidate_ref, "catalog": catalog, "schema": schema}
     artifacts = load_artifacts(args.source_artifact) if args.source_artifact else None
     if artifacts:
         from gold.implementation.dimensional.lineage import build_dimensional_lineage_from_artifacts
@@ -202,6 +229,10 @@ def main(argv=None):
             builder = (builder
                        .config("spark.sql.catalog.lakehouse.warehouse", scope.warehouse)
                        .config("spark.sql.catalog.lakehouse.ref", scope.nessie_ref))
+        elif layout.is_production:
+            builder = (builder
+                       .config("spark.sql.catalog.lakehouse.warehouse", "s3a://ecommerce-lakehouse-prod/lakehouse")
+                       .config("spark.sql.catalog.lakehouse.ref", production_ref))
         spark = builder.getOrCreate()
         configure_s3a(spark)
         minio_client = create_minio_client()
@@ -213,6 +244,11 @@ def main(argv=None):
             dim_date_start=args.dim_date_start, dim_date_end=args.dim_date_end, mode=args.mode, scope=scope,
             merge_plan=merge_plan,
             captured_at=started_at,
+            nessie_ref=(
+                scope.nessie_ref if scope is not None
+                else production_ref if layout.is_production
+                else os.environ.get("NESSIE_REF")
+            ),
         )
         result["mode"] = args.mode
         if args.mode == WRITE:
@@ -228,11 +264,16 @@ def main(argv=None):
             lineage_identity=dimensional_lineage_identity(lineage, scope=scope),
             bucket=args.bucket,
             prefix=scope.prefix if scope is not None else None,
-            ref=scope.nessie_ref if scope is not None else "main",
+            ref=(
+                scope.nessie_ref if scope is not None
+                else production_ref if layout.is_production
+                else os.environ.get("NESSIE_REF")
+            ),
             writer_result=result,
             verification=result.get("verification"),
             client=minio_client,
             scope=scope,
+            **production_evidence,
         )
         if args.mode == WRITE and os.environ.get("GOLD_RUN_METADATA_PERSIST_ENABLED", "false").lower() == "true":
             metadata = build_runtime_dimensional_metadata(

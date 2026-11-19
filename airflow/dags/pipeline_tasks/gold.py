@@ -28,7 +28,7 @@ from common.bounded_e2e_scope import TEST_BUCKET, build_bounded_e2e_scope
 from common.manifest import canonical_manifest_identity
 from common.minio import create_minio_client
 from common.runtime_policy import is_feature_enabled
-from common.storage_layout import QUALITY_BUCKET
+from common.storage_layout import PRODUCTION_BUCKET, QUALITY_BUCKET
 from common.storage_layout import validate_storage_environment
 from gold_gate_policy import decide_gold_dimensional_gate
 from gold.implementation.dimensional.lineage import build_parquet_lineage_artifact
@@ -240,7 +240,7 @@ def _structured_writer_result(value):
 
 @task(task_id="publish_gold_to_active", retries=0)
 def publish_gold_to_active_task(writer_result):
-    """CAS-publish only a verified WRITE result to the stable BI branch."""
+    """CAS-publish only verified evidence using the selected storage contract."""
     writer_result = _structured_writer_result(writer_result)
     if (
         writer_result.get("status") == "GOLD_NO_CHANGE"
@@ -249,8 +249,6 @@ def publish_gold_to_active_task(writer_result):
         raise AirflowSkipException("Gold NO_CHANGE: publication and confirmations are skipped")
     if writer_result.get("mode") != "WRITE":
         return {"status": "SKIPPED", "reason": "Gold writer was not WRITE"}
-    if os.environ.get("BRONZE_BUCKET") != TEST_BUCKET:
-        return {"status": "SKIPPED", "reason": "Active publication requires the approved shared Gold bucket"}
     report = writer_result.get("certification_report")
     if not isinstance(report, dict) or report.get("certified") is not True or report.get("can_write") is not True:
         raise RuntimeError("Gold publish requires certified WRITE evidence")
@@ -259,12 +257,52 @@ def publish_gold_to_active_task(writer_result):
     expected_hash = os.environ.get("BI_GOLD_CURRENT_EXPECTED_HASH")
     if not expected_hash:
         raise RuntimeError("BI_GOLD_CURRENT_EXPECTED_HASH is required for active Gold publication")
-    from gold.implementation.bi_ref_promotion import (
-        NessieRestAdapter,
-        advance_stable_branch,
-        candidate_from_certification,
-    )
-    candidate_ref = report.get("ref")
+    from gold.implementation.bi_ref_promotion import NessieRestAdapter
+    from gold.implementation.bi_ref_promotion import advance_production_ref
+    from gold.implementation.bi_ref_promotion import advance_stable_branch
+    from gold.implementation.bi_ref_promotion import candidate_from_certification
+    from gold.implementation.bi_ref_promotion import production_candidate_from_certification
+    bucket = os.environ.get("BRONZE_BUCKET")
+    if bucket == PRODUCTION_BUCKET:
+        from common.storage_layout import validate_storage_environment
+
+        validate_storage_environment(os.environ)
+        from gold.implementation.bi_ref_promotion import validate_production_publish_config
+
+        production_config = validate_production_publish_config(os.environ)
+        if os.environ.get("PRODUCTION_LAKEHOUSE_WRITE_APPROVED") != "1":
+            raise RuntimeError("PRODUCTION_LAKEHOUSE_WRITE_APPROVED=1 is required for production publication")
+        adapter = NessieRestAdapter(os.environ["NESSIE_URI"])
+        candidate_ref = report.get("candidate_ref")
+        if not isinstance(candidate_ref, str):
+            raise RuntimeError("Production certification must contain explicit candidate_ref")
+        candidate_reference = adapter.get_ref(candidate_ref)
+        candidate_hash = candidate_reference.hash
+        # Bind the certification to the read-back candidate HEAD immediately
+        # before validation.  The writer certifies table/manifest evidence but
+        # cannot know the final Nessie commit hash until Spark has committed;
+        # promotion must validate the hash observed from Nessie, not a missing
+        # or stale value in the serialized writer report.
+        report = {**report, "candidate_hash": candidate_hash}
+        manifest = production_candidate_from_certification(
+            report,
+            candidate_ref=candidate_ref,
+            candidate_hash=candidate_hash,
+            nessie_reference=candidate_reference,
+            catalog=production_config["catalog"],
+            schema=production_config["schema"],
+            rollback_hash=production_config["rollback_hash"],
+            rollback_owner=production_config["rollback_owner"],
+        )
+        return advance_production_ref(
+            manifest,
+            adapter=adapter,
+            expected_current_hash=expected_hash,
+            apply=True,
+        )
+    if bucket != TEST_BUCKET:
+        return {"status": "SKIPPED", "reason": "Active publication requires production or approved bounded bucket"}
+    candidate_ref = report.get("candidate_ref", report.get("ref"))
     schema = os.environ.get("GOLD_TARGET_NAMESPACE", "gold_run_20261112_gold_06")
     scope = build_bounded_e2e_scope(os.environ)
     if not isinstance(candidate_ref, str) or candidate_ref != scope.nessie_ref or not schema:
@@ -280,12 +318,7 @@ def publish_gold_to_active_task(writer_result):
         prefix=scope.prefix,
         run_id=scope.run_id,
     )
-    return advance_stable_branch(
-        manifest,
-        adapter=adapter,
-        expected_current_hash=expected_hash,
-        apply=True,
-    )
+    return advance_stable_branch(manifest, adapter=adapter, expected_current_hash=expected_hash, apply=True)
 
 
 @task(retries=0)

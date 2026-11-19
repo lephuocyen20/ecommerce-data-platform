@@ -283,7 +283,7 @@ def _identity(value, field):
         raise SnapshotReuseContractError(f"Invalid snapshot reuse {field}")
 
 
-def build_snapshot_reuse_artifact(*, table, graph, manifest, readback, ref="main",
+def build_snapshot_reuse_artifact(*, table, graph, manifest, readback, ref=None,
                                   stale_policy, mode="WRITE"):
     """Build a versioned reusable PASS envelope from verified evidence.
 
@@ -294,6 +294,8 @@ def build_snapshot_reuse_artifact(*, table, graph, manifest, readback, ref="main
         raise SnapshotReuseContractError("DRY_RUN cannot issue reusable Gold PASS metadata")
     if table not in _REUSABLE_DIMENSIONS or not all(isinstance(item, dict) for item in (graph, manifest, readback)):
         raise SnapshotReuseContractError(f"Incomplete reusable snapshot evidence: {table}")
+    if not isinstance(ref, str) or not ref:
+        raise SnapshotReuseContractError("Reusable snapshot ref must be explicit")
     target = _REUSABLE_DIMENSIONS[table]
     if graph.get("table") != target or manifest.get("table") != target:
         raise SnapshotReuseContractError(f"Reusable snapshot table mismatch: {table}")

@@ -21,14 +21,21 @@ from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from gold.implementation.gold_table_registry import RUN06_NESSIE_REF, RUN06_SCHEMA, RUN06_TABLES
+from common.storage_layout import PRODUCTION_BUCKET, PRODUCTION_REF
 
 
 TARGET_REF = "bi_gold_current"
+PRODUCTION_TARGET_REF = PRODUCTION_REF
+PRODUCTION_CATALOG = "lakehouse"
+PRODUCTION_SCHEMA = RUN06_SCHEMA
+PRODUCTION_ROLLBACK_HASH = "a4274ec5b703fc37a34ecb8efab17931773aa82987e37ca324a7c798cbfb59e7"
+PRODUCTION_ROLLBACK_OWNER = "analytics"
 EXPECTED_CANDIDATE_REF = RUN06_NESSIE_REF
 EXPECTED_SCHEMA = RUN06_SCHEMA
 EXPECTED_TABLES = RUN06_TABLES
 HASH_RE = re.compile(r"^[0-9a-fA-F]{8,128}$")
 REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
+PRODUCTION_CANDIDATE_REF_RE = re.compile(r"^gold_prod_candidate_[A-Za-z0-9][A-Za-z0-9._-]{0,47}$")
 LOCAL_NESSIE_HOSTS = {"localhost", "127.0.0.1", "host.docker.internal", "nessie"}
 LOCAL_NESSIE_PORTS = {19120, 19130, 19132}
 
@@ -55,6 +62,176 @@ class NessieReference:
     name: str
     hash: str
     ref_type: str = "BRANCH"
+
+
+@dataclass(frozen=True)
+class ProductionPublishManifest:
+    candidate_ref: str
+    candidate_hash: str
+    stable_ref: str
+    catalog: str
+    schema: str
+    rollback_hash: str
+    rollback_owner: str
+    tables: tuple[str, ...]
+    status: str = "VERIFIED"
+
+
+def validate_production_publish_config(
+    environ: Mapping[str, Any],
+    *,
+    rollback_hash: str = PRODUCTION_ROLLBACK_HASH,
+    rollback_owner: str = PRODUCTION_ROLLBACK_OWNER,
+) -> dict[str, str]:
+    """Validate production identity and rollback metadata before REST access."""
+    apply_enabled = environ.get("BI_ACTIVE_PUBLISH_APPLY") == "1"
+    if environ.get("BRONZE_BUCKET") != PRODUCTION_BUCKET:
+        raise PromotionError("production publication requires ecommerce-lakehouse-prod")
+    if str(environ.get("LAKEHOUSE_STORAGE_ENV", "")).strip().lower() != "production":
+        raise PromotionError("production publication requires LAKEHOUSE_STORAGE_ENV=production")
+    if apply_enabled and not environ.get("NESSIE_REF"):
+        raise PromotionError("NESSIE_REF is required for production publication")
+    if environ.get("NESSIE_REF") != PRODUCTION_TARGET_REF:
+        raise PromotionError("production publication requires NESSIE_REF=gold_prod_current")
+    if apply_enabled and not environ.get("GOLD_CANDIDATE_REF"):
+        raise PromotionError("GOLD_CANDIDATE_REF is required for production publication")
+    if apply_enabled and not environ.get("BI_ACTIVE_PUBLISH_TARGET_REF"):
+        raise PromotionError("BI_ACTIVE_PUBLISH_TARGET_REF is required for production publication")
+    if environ.get("BI_ACTIVE_PUBLISH_TARGET_REF") != PRODUCTION_TARGET_REF:
+        raise PromotionError("BI_ACTIVE_PUBLISH_TARGET_REF must be gold_prod_current")
+    if apply_enabled and not environ.get("BI_ACTIVE_PUBLISH_CATALOG"):
+        raise PromotionError("BI_ACTIVE_PUBLISH_CATALOG is required for production publication")
+    if environ.get("BI_ACTIVE_PUBLISH_CATALOG") != PRODUCTION_CATALOG:
+        raise PromotionError("BI_ACTIVE_PUBLISH_CATALOG must be lakehouse")
+    if apply_enabled and not environ.get("BI_ACTIVE_PUBLISH_SCHEMA"):
+        raise PromotionError("BI_ACTIVE_PUBLISH_SCHEMA is required for production publication")
+    schema = environ.get("BI_ACTIVE_PUBLISH_SCHEMA")
+    if schema != PRODUCTION_SCHEMA:
+        raise PromotionError("BI_ACTIVE_PUBLISH_SCHEMA is outside the certified production scope")
+    if apply_enabled and not environ.get("BI_ACTIVE_PUBLISH_ROLLBACK_HASH"):
+        raise PromotionError("BI_ACTIVE_PUBLISH_ROLLBACK_HASH is required for production publication")
+    if apply_enabled and not environ.get("BI_ACTIVE_PUBLISH_ROLLBACK_OWNER"):
+        raise PromotionError("BI_ACTIVE_PUBLISH_ROLLBACK_OWNER is required for production publication")
+    return validate_production_rollback_metadata(
+        rollback_hash=environ.get("BI_ACTIVE_PUBLISH_ROLLBACK_HASH", rollback_hash),
+        rollback_owner=environ.get("BI_ACTIVE_PUBLISH_ROLLBACK_OWNER", rollback_owner),
+    ) | {"stable_ref": PRODUCTION_TARGET_REF, "catalog": PRODUCTION_CATALOG, "schema": schema}
+
+
+def validate_production_rollback_metadata(*, rollback_hash: Any, rollback_owner: Any) -> dict[str, str]:
+    """Require an explicit, known-good rollback identity for production."""
+    rollback_hash = _require_hash(rollback_hash, "rollback_hash")
+    if len(rollback_hash) != 64 or rollback_hash.lower() != PRODUCTION_ROLLBACK_HASH:
+        raise PromotionError("rollback_hash is not the approved production target")
+    rollback_owner = _require_string(rollback_owner, "rollback_owner")
+    if rollback_owner != PRODUCTION_ROLLBACK_OWNER:
+        raise PromotionError("rollback_owner must be analytics")
+    return {"rollback_hash": rollback_hash, "rollback_owner": rollback_owner}
+
+
+def validate_production_candidate_ref(candidate_ref: Any) -> str:
+    """Validate the explicit production candidate naming contract."""
+    candidate_ref = _require_string(candidate_ref, "candidate_ref")
+    if PRODUCTION_CANDIDATE_REF_RE.fullmatch(candidate_ref) is None:
+        raise PromotionError("candidate_ref must be a strict gold_prod_candidate ref")
+    return candidate_ref
+
+
+def production_candidate_from_certification(
+    report: Mapping[str, Any],
+    *,
+    candidate_ref: str,
+    candidate_hash: str,
+    nessie_reference: NessieReference,
+    catalog: str = PRODUCTION_CATALOG,
+    schema: str = PRODUCTION_SCHEMA,
+    rollback_hash: str = PRODUCTION_ROLLBACK_HASH,
+    rollback_owner: str = PRODUCTION_ROLLBACK_OWNER,
+) -> ProductionPublishManifest:
+    """Validate production-only writer evidence without creating any client."""
+    if not isinstance(report, Mapping) or report.get("certified") is not True or report.get("can_write") is not True:
+        raise PromotionError("production publication requires certified writable evidence")
+    if report.get("mode") != "WRITE" or report.get("verification_status") != "VERIFIED":
+        raise PromotionError("production publication requires verified WRITE evidence")
+    candidate_ref = validate_production_candidate_ref(candidate_ref)
+    if nessie_reference.name != candidate_ref or nessie_reference.ref_type != "BRANCH":
+        raise PromotionError("production candidate must be an existing Nessie BRANCH")
+    if report.get("candidate_ref") != candidate_ref:
+        raise PromotionError("production evidence ref does not match candidate_ref")
+    if report.get("candidate_hash") != nessie_reference.hash:
+        raise PromotionError("production evidence candidate_hash does not match Nessie BRANCH hash")
+    if report.get("bucket") != PRODUCTION_BUCKET:
+        raise PromotionError("production evidence bucket must be ecommerce-lakehouse-prod")
+    if report.get("catalog") != PRODUCTION_CATALOG or catalog != PRODUCTION_CATALOG:
+        raise PromotionError("production catalog must be lakehouse")
+    if report.get("schema") != PRODUCTION_SCHEMA or schema != PRODUCTION_SCHEMA:
+        raise PromotionError("production schema is outside the certified scope")
+    candidate_hash = _require_hash(candidate_hash, "candidate_hash")
+    if candidate_hash != nessie_reference.hash:
+        raise PromotionError("candidate_hash does not match Nessie BRANCH hash")
+    outputs = report.get("outputs")
+    if not isinstance(outputs, list) or len(outputs) != len(EXPECTED_TABLES):
+        raise PromotionError("production evidence must contain exactly seven outputs")
+    tables = []
+    for item in outputs:
+        if not isinstance(item, Mapping) or item.get("table") not in EXPECTED_TABLES:
+            raise PromotionError("production output table set is not allowlisted")
+        if item["table"] in tables or not isinstance(item.get("snapshot_id"), int) or item["snapshot_id"] <= 0:
+            raise PromotionError("production output snapshot IDs must be positive and unique")
+        if item.get("readback_status") != "PASS":
+            raise PromotionError("production output readback must PASS")
+        tables.append(item["table"])
+    if tuple(sorted(tables)) != tuple(sorted(EXPECTED_TABLES)):
+        raise PromotionError("production output table set is incomplete")
+    rollback = validate_production_rollback_metadata(rollback_hash=rollback_hash, rollback_owner=rollback_owner)
+    return ProductionPublishManifest(
+        candidate_ref=candidate_ref,
+        candidate_hash=candidate_hash,
+        stable_ref=PRODUCTION_TARGET_REF,
+        catalog=catalog,
+        schema=schema,
+        rollback_hash=rollback["rollback_hash"],
+        rollback_owner=rollback["rollback_owner"],
+        tables=tuple(sorted(tables)),
+    )
+
+
+def advance_production_ref(
+    manifest: ProductionPublishManifest,
+    *,
+    adapter: Optional[NessieRestAdapter] = None,
+    expected_current_hash: Optional[str] = None,
+    apply: bool = False,
+) -> dict[str, Any]:
+    """Plan or CAS-advance production stable ref; default is read-only."""
+    if manifest.stable_ref != PRODUCTION_TARGET_REF or manifest.catalog != PRODUCTION_CATALOG:
+        raise PromotionError("production manifest identity is invalid")
+    validate_production_rollback_metadata(
+        rollback_hash=manifest.rollback_hash, rollback_owner=manifest.rollback_owner
+    )
+    expected_current_hash = _require_hash(expected_current_hash, "expected_current_hash") if expected_current_hash else None
+    if apply and (adapter is None or expected_current_hash is None):
+        raise PromotionError("production apply requires adapter and expected_current_hash")
+    if adapter is None:
+        return {"mode": "DRY_RUN", "target_ref": PRODUCTION_TARGET_REF, "candidate_hash": manifest.candidate_hash, "schema": manifest.schema}
+    current = adapter.get_ref(PRODUCTION_TARGET_REF)
+    if current.ref_type != "BRANCH":
+        raise PromotionError("production stable target must be an existing BRANCH")
+    if expected_current_hash is not None and current.hash != expected_current_hash:
+        raise PromotionError("current production target hash does not match expected_current_hash")
+    if current.hash == manifest.candidate_hash:
+        return {
+            "mode": "APPLY_NOOP" if apply else "DRY_RUN_NOOP",
+            "target_ref": PRODUCTION_TARGET_REF,
+            "assigned_hash": current.hash,
+            "schema": manifest.schema,
+        }
+    if not apply:
+        return {"mode": "DRY_RUN_UPDATE_BRANCH", "target_ref": PRODUCTION_TARGET_REF, "current_hash": current.hash, "candidate_hash": manifest.candidate_hash, "schema": manifest.schema}
+    updated = adapter.update_branch(PRODUCTION_TARGET_REF, manifest.candidate_hash, current.hash)
+    if updated.hash != manifest.candidate_hash:
+        raise PromotionError("production branch update did not verify the candidate hash")
+    return {"mode": "APPLY_UPDATE_BRANCH", "target_ref": PRODUCTION_TARGET_REF, "assigned_hash": updated.hash, "schema": manifest.schema}
 
 
 def candidate_from_certification(

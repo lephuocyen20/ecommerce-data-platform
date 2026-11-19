@@ -209,7 +209,7 @@ def recovery_state(graph_published, table_states):
 
 def run_dimensional_graph(spark, client, bucket, lineage, *, dim_date_start, dim_date_end, mode=DRY_RUN,
                           scope=None, configured_date_start=None, configured_date_end=None, merge_plan=None,
-                          write_guard=None, captured_at=None):
+                          write_guard=None, captured_at=None, nessie_ref=None):
     """Validate and optionally publish the whole Gold graph in dependency order.
 
     A failed write intentionally leaves the graph manifest unpublished.  The
@@ -225,6 +225,11 @@ def run_dimensional_graph(spark, client, bucket, lineage, *, dim_date_start, dim
         raise DimensionalWriteError("ecommerce-data-lake WRITE requires a validated bounded E2E scope")
     if scope is not None and bucket != scope.bucket:
         raise DimensionalWriteError("E2E scope bucket does not match writer bucket")
+    effective_ref = scope.nessie_ref if scope is not None else nessie_ref
+    if not isinstance(bucket, str) or not bucket:
+        raise DimensionalWriteError("Writer requires an explicit runtime bucket")
+    if mode == WRITE and (not isinstance(effective_ref, str) or not effective_ref):
+        raise DimensionalWriteError("Writer requires an explicit runtime Nessie ref")
     validate_cross_table_coverage(lineage)
     historical_coverage = configured_date_start is not None or configured_date_end is not None
     sources = None
@@ -328,7 +333,7 @@ def run_dimensional_graph(spark, client, bucket, lineage, *, dim_date_start, dim
                 snapshot_id=snapshot_id,
                 quality=table_quality,
                 namespace=_namespace(scope),
-                ref=scope.nessie_ref if scope is not None else os.getenv("NESSIE_REF", "main"),
+                ref=effective_ref,
                 captured_at=captured_at,
             )
             state = publish_manifest(client, bucket, manifest, table_manifest_key(graph["identity"], table, scope))
