@@ -64,6 +64,60 @@ The Trino coordinator also accepts the `Presto` protocol header required by
 Metabase's bundled Presto JDBC driver; this is only a local compatibility
 setting and does not change the read-only policy.
 
+### Read-only Trino/Metabase smoke checks
+
+These checks target the current local endpoint and certified schema. They are
+safe only as read-only queries; do not add `INSERT`, `UPDATE`, `DELETE`,
+`MERGE`, DDL, `CALL`, or Iceberg maintenance procedures.
+
+After the already-approved local services are running, query Trino through its
+local port with the policy user:
+
+```powershell
+$query = @'
+SELECT table_name, row_count
+FROM (
+  SELECT 'dim_date' AS table_name, count(*) AS row_count FROM lakehouse.gold_run_20261112_gold_06.dim_date
+  UNION ALL SELECT 'dim_customer', count(*) FROM lakehouse.gold_run_20261112_gold_06.dim_customer
+  UNION ALL SELECT 'dim_product', count(*) FROM lakehouse.gold_run_20261112_gold_06.dim_product
+  UNION ALL SELECT 'fact_orders', count(*) FROM lakehouse.gold_run_20261112_gold_06.fact_orders
+  UNION ALL SELECT 'fact_order_items', count(*) FROM lakehouse.gold_run_20261112_gold_06.fact_order_items
+  UNION ALL SELECT 'fact_payments', count(*) FROM lakehouse.gold_run_20261112_gold_06.fact_payments
+  UNION ALL SELECT 'fact_shipments', count(*) FROM lakehouse.gold_run_20261112_gold_06.fact_shipments
+)
+ORDER BY table_name
+'@
+$headers = @{ 'X-Trino-User' = 'metabase' }
+$response = Invoke-RestMethod -Method Post -Uri 'http://localhost:8081/v1/statement' `
+  -Headers $headers -ContentType 'text/plain' -Body $query
+$rows = @()
+while ($null -ne $response) {
+  if ($response.error) {
+    throw ("Trino query failed: " + ($response.error | ConvertTo-Json -Compress))
+  }
+  if ($response.data) {
+    $rows += @($response.data)
+  }
+  if (-not $response.nextUri) {
+    break
+  }
+  $response = Invoke-RestMethod -Method Get -Uri $response.nextUri -Headers $headers
+}
+if ($rows.Count -ne 7) {
+  throw ("Expected seven Gold table count rows, got " + $rows.Count)
+}
+$rows
+```
+
+The command follows Trino pagination, fails on a Trino error, and asserts seven
+count rows for the exact schema. A connection error, missing table, or
+incomplete result is a failed smoke check; do not treat it as an empty dataset.
+In Metabase, use the existing native Trino connection (`trino:8080`, user
+`metabase`, catalog `lakehouse`, schema `gold_run_20261112_gold_06`) and run a
+saved/native question that issues only `SELECT` against those seven tables.
+Do not edit the database, run sync/write actions, alter the connection, or
+change the stable Nessie ref as part of smoke verification.
+
 ## REST Catalog local validation
 
 The obsolete SQLite REST fixture and inactive REST config trees were removed
@@ -184,3 +238,32 @@ There is no `warehouse_gate`, raw PostgreSQL analytical loader, or `dbt_build` t
 The pytest command is also local-only; a fresh clone must supply the local
 `tests/` workspace separately before running it.
 Runtime writes remain subject to approved local-only quality and cutover plans. Never point local guards at production or shared storage.
+
+## Incremental states and bounded real-delta E2E
+
+For operations, distinguish `NO_DATA` (one input had no eligible rows),
+`NO_CHANGE` (all required inputs were no-op and Gold returned
+`GOLD_NO_CHANGE/NO_CHANGE`), `SUCCESS` (the DAG and applicable evidence
+completed, including a valid no-op), `FAILED` (a task or contract invariant
+failed), and `STALE` (no valid run/evidence in the observation window or a
+freshness/lock boundary was exceeded). `NO_DATA` and `NO_CHANGE` are not
+failures; a `FAILED` or `STALE` health result remains fail-closed.
+
+The health command is the operator entry point and must be allowed to fail
+closed. First capture its output and inspect Compose, import errors, task logs,
+and lock ownership. Do not clear a run, delete a lock, trigger a DAG, reset a
+watermark/checkpoint, or mutate PostgreSQL/MinIO/Nessie while diagnosing.
+Remediation requires the existing guarded recovery path and separate approval.
+
+The health command validates runtime/DAG health only. It does not prove Gold
+manifest/hash parity, seven-table readback, lock state, or BI publication state;
+collect those evidence items separately before declaring a full data-contract
+`SUCCESS`.
+
+`BI_ACTIVE_PUBLISH_APPLY=0` remains mandatory during these checks. A real-delta
+E2E is not demonstrated by `NO_CHANGE` and requires separate explicit bounded
+approval before any source or lakehouse write. Before client creation, validate
+the immutable contract: `LAKEHOUSE_E2E_APPROVED=1`,
+`LAKEHOUSE_E2E_TEST_BUCKET=ecommerce-data-lake`, and exact
+`LAKEHOUSE_E2E_PREFIX=quality-it/<run-id>/` for the approved
+`LAKEHOUSE_E2E_RUN_ID`. Without that approval, keep the real-delta E2E deferred.
