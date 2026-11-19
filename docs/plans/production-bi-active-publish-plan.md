@@ -510,6 +510,52 @@ git diff --check
 - Trino and Metabase read-only smoke remained PASS after certification; no
   active consumer cutover was required beyond the already-active stable ref.
 
+## Approved local production-mode delta seed (2026-11-19)
+
+- User approved a real incremental WRITE event using the local Docker
+  PostgreSQL target, with a larger deterministic delta.
+- Immutable run ID: `prodwrite20261119r06`.
+- Target: local `postgres` host, database `ecommerce_platform`, in the
+  production-mode pipeline configuration; no external database.
+- Planned rows: 5 customers, 8 products, 20 orders, 40 order items, 20
+  payments, and 20 shipments. Parent rows are inserted before dependents.
+- Allowed operation: idempotent `INSERT ... ON CONFLICT DO NOTHING` only. No
+  delete, truncate, drop, checkpoint reset, watermark reset, cleanup,
+  compaction or snapshot expiration.
+- The seed command must fail closed unless its explicit production-mode approval
+  flag, local source host/database, production bucket and exact run ID are all
+  present before opening a PostgreSQL client.
+- Seed QA round 1: **FAIL**. Independent review found that PostgreSQL's
+  `set_updated_at()` trigger overwrites `updated_at` on `ON CONFLICT DO UPDATE`,
+  so replaying the same run ID was not deterministic; `DB_PORT` was also not
+  restricted to the local Compose port.
+- Required correction before seed: use conflict handling that leaves existing
+  run-scoped rows untouched on replay, require `DB_PORT=5432`, then rerun
+  independent static QA and only execute the mutation after it passes.
+
+### Seed QA round 1 correction scope (2026-11-19)
+
+- Corrected `scripts/seed_production_incremental_delta.py` within the approved
+  scope: all six table statements now use `INSERT ... ON CONFLICT DO NOTHING`.
+  Existing run-scoped IDs are therefore not updated on replay, so PostgreSQL
+  `set_updated_at()` triggers cannot change replayed rows. Parent tables remain
+  ordered before dependents, preserving the FK-valid cardinalities of 5
+  customers, 8 products, 20 orders, 40 order items, 20 payments, and 20
+  shipments.
+- Added a strict `DB_PORT=5432` requirement to the pre-connect scope guard; the
+  connection still receives the guarded environment value.
+- No seed execution, PostgreSQL client creation, external-service test, or
+  destructive SQL was performed.
+- Static correction checks completed: exactly six `ON CONFLICT ... DO NOTHING`
+  clauses, no `DO UPDATE`, strict port guard present before `connect()`, six
+  table order/cardinality contracts present, and `git diff --check` passed.
+- Independent QA round 3: **PASS** for the corrected static contract. Evidence:
+  six `DO NOTHING` handlers, zero `DO UPDATE` handlers, strict local port and
+  credential guards before client creation, and `git diff --check` passed. No
+  seed or database connection was executed during QA.
+- Runtime mutation remains the next approved action, using the exact local
+  target and immutable run ID above.
+
 ### QA round 3 follow-up implementation (2026-11-19)
 
 - Approved scope was limited to the two quality-it orchestration failures where
@@ -534,3 +580,70 @@ git diff --check
   was fully green.
 - Implementation handoff is ready for independent QA; no runtime certification
   or production enablement is claimed.
+
+## Local production-mode delta seed implementation (2026-11-19)
+
+- Added `scripts/seed_production_incremental_delta.py` for the approved local
+  production-mode event `prodwrite20261119r06`.
+- The script validates, before importing or constructing a PostgreSQL client:
+  `PRODUCTION_INCREMENTAL_WRITE_APPROVED=1`,
+  `BRONZE_BUCKET=ecommerce-lakehouse-prod`,
+  `LAKEHOUSE_STORAGE_ENV=production`, local `DB_HOST` (`postgres`,
+  `localhost`, or `127.0.0.1`), and `DB_NAME=ecommerce_platform`.
+- The deterministic FK-valid delta contains 5 customers, 8 products, 20
+  orders, 40 order items, 20 payments, and 20 shipments with a fixed newer
+  `updated_at` timestamp. Parent tables are inserted before dependents.
+- SQL is limited to `INSERT ... ON CONFLICT DO NOTHING`; replaying the same
+  run ID leaves existing rows untouched, avoiding the source `updated_at`
+  trigger. No seed execution,
+  PostgreSQL client creation, database mutation, checkpoint/watermark change,
+  or external-service test was performed.
+- `DB_PORT=5432`, `DB_USER`, and `DB_PASSWORD` are required explicitly; the
+  seed script has no credential fallback.
+- Static verification command:
+  `powershell -NoProfile -Command "$p=Get-Content -Raw scripts/seed_production_incremental_delta.py; if ($p -notmatch 'PRODUCTION_INCREMENTAL_WRITE_APPROVED' -or $p -notmatch 'ecommerce-lakehouse-prod' -or $p -notmatch 'LAKEHOUSE_STORAGE_ENV' -or $p -notmatch 'ecommerce_platform' -or $p -notmatch 'prodwrite20261119r06') { throw 'required guard missing' }; if (($p | Select-String -Pattern 'ON CONFLICT' -AllMatches).Matches.Count -ne 6) { throw 'expected six upserts' }; if ($p -match '(?i)\\b(DELETE|TRUNCATE|DROP|RESET|CLEANUP)\\b') { throw 'destructive token found' }"`
+- `git diff --check` completed without output. Python compile/pytest were not
+  run because no Python interpreter is installed in the host environment.
+
+### Seed QA round 3 final QA record
+
+- QA round 1: **FAIL** because `ON CONFLICT DO UPDATE` activated the source
+  `set_updated_at()` trigger on replay and `DB_PORT` was not restricted.
+- Correction changed all six conflict handlers to `DO NOTHING`, added strict
+  `DB_PORT=5432`, and removed credential fallbacks.
+- QA round 3 independently confirmed the corrected plan/source contract before
+  the approved mutation. The only remaining evidence gap is runtime seed and
+  downstream production WRITE verification.
+
+### Seed QA round 4 correction (2026-11-19)
+
+- QA round 4 functional review: **PASS**. The only failure was Git diff safety:
+  the new seed script was untracked, so the standard diff did not cover the
+  implementation.
+- Correction: stage the seed script and this plan together before the next QA;
+  this is a review-boundary change only, not a commit or runtime mutation.
+- The next QA must verify the staged full intended diff, then the approved
+  runtime seed may proceed. Runtime seed and downstream production WRITE remain
+  unverified.
+
+### Runtime production incremental WRITE evidence (2026-11-19)
+
+- Execution gate passed against the local Docker PostgreSQL target. The exact
+  ID ranges were absent before mutation; the approved seed then returned
+  `PRODUCTION_INCREMENTAL_DELTA_SEED=PASS` for run
+  `prodwrite20261119r06`, with 5 customers, 8 products, 20 orders, 40 order
+  items, 20 payments, and 20 shipments.
+- PostgreSQL read-back returned exactly `5/8/20/40/20/20` matching rows and
+  FK read-back returned `20/40/20/20` valid child relationships. Replaying the
+  same immutable run ID returned PASS and did not create duplicates; the
+  script remains `ON CONFLICT DO NOTHING` only.
+- Airflow production WRITE event `manual__prodwrite20261119r06` completed
+  successfully. All 59 task instances reached terminal state: 53 success and
+  6 intentional `skip_silver_*` states. `gold_dimensional_write`,
+  `publish_gold_to_active`, and all seven Gold confirmation tasks were
+  successful.
+- Nessie read-back confirmed `gold_prod_current` and the configured candidate
+  branch now point to hash
+  `7fe1816313bf5cb6964a786c6a09a6f94dac16c9d07e9f8da67293315c91ef54`.
+- This closes the previously missing production WRITE-event evidence. No
+  cleanup, rollback, checkpoint reset, or snapshot expiration was performed.

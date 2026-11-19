@@ -10,6 +10,19 @@
 - `BI_ACTIVE_PUBLISH_APPLY=0` remains set, so the DAG does not perform another
   automatic stable-ref promotion or BI cutover.
 
+## Session 2026-11-19: production incremental WRITE event — PASS
+
+- Seeded the approved local PostgreSQL delta under immutable run ID
+  `prodwrite20261119r06`: 5 customers, 8 products, 20 orders, 40 order items,
+  20 payments, and 20 shipments.
+- Read-back verified exact row counts and FK relationships; replay with the
+  same run ID passed without duplication.
+- Airflow run `manual__prodwrite20261119r06` completed successfully. Gold
+  dimensional WRITE, active publish, and all seven Gold confirmations passed.
+- Nessie stable and configured candidate refs read back the new hash
+  `7fe1816313bf5cb6964a786c6a09a6f94dac16c9d07e9f8da67293315c91ef54`.
+- No destructive maintenance, rollback, checkpoint reset, or cleanup was run.
+
 ## Gold production candidate r04 runtime certification - PASS WITH WARNINGS (2026-11-18)
 
 - The approved full-Silver candidate r04 completed a seven-table Gold graph
