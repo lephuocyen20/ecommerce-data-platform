@@ -58,6 +58,42 @@ class StorageLayout:
         return prefix + suffix
 
 
+@dataclass(frozen=True)
+class ProductionGoldScope:
+    """Explicit production Gold coordinates for an isolated candidate branch.
+
+    Production is not the bounded E2E exception: the scope has no object
+    prefix, but it still carries an explicit candidate ref and target namespace
+    so a WRITE cannot fall back to the legacy ``gold`` namespace or bucket.
+    """
+
+    bucket: str
+    candidate_ref: str
+    target_namespace: str
+    prefix: str = ""
+
+    @property
+    def warehouse(self):
+        return f"s3a://{self.bucket}/lakehouse"
+
+    @property
+    def nessie_ref(self):
+        return self.candidate_ref
+
+    @property
+    def gold_namespace(self):
+        return self.target_namespace
+
+    @property
+    def silver_namespace(self):
+        return "silver"
+
+    def key(self, suffix):
+        if not isinstance(suffix, str) or suffix.startswith("/") or ".." in suffix.split("/"):
+            raise StorageLayoutError("Object suffix escapes the production Gold layout")
+        return self.prefix + suffix
+
+
 def _require_name(value, label):
     if not isinstance(value, str) or _NAME.fullmatch(value) is None:
         raise StorageLayoutError(f"Invalid {label}")
@@ -140,7 +176,7 @@ def gold_table_key(table_name, suffix="", *, layout=None, environ=None):
 
 __all__ = [
     "LEGACY_LAYOUT", "PRODUCTION_BUCKET", "PRODUCTION_LAYOUT", "PRODUCTION_REF",
-    "QUALITY_BUCKET", "QUALITY_LAYOUT", "StorageLayout", "StorageLayoutError",
+    "QUALITY_BUCKET", "QUALITY_LAYOUT", "ProductionGoldScope", "StorageLayout", "StorageLayoutError",
     "bronze_table_key", "build_layer_key", "gold_table_key", "silver_table_key",
     "validate_storage_environment",
     "is_production_ref",

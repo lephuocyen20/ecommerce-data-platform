@@ -1368,3 +1368,55 @@ runtime certification is recorded below; `demo20261114k` remains unretried.
   configuration before the next operational run.
 - Credentials were exposed in earlier local diagnostics; rotate them outside
   this task and do not record replacement values in repository documentation.
+
+## Runtime certification — full production-bucket candidate (2026-11-19)
+
+- Corrected historical parent closure in `ingestion/historical/extractor.py` and
+  `ingestion/historical/pipeline.py`: `customers` and `products` are selected
+  by `created_at <= capture_end`, while orders and child tables retain the
+  bounded `updated_at` window. This prevents FK loss when a parent is updated
+  after the requested snapshot or was created before the ingestion start date.
+- Added a regression for the parent-closure query. Focused verification:
+  `tests/test_historical_backfill_contracts.py` and
+  `tests/test_historical_pipeline.py` — **80 passed**; historical compileall
+  passed; no incremental watermark/checkpoint mutation occurred.
+- Approved run `prodbackfill20261119full01` with capture end
+  `2026-11-19T02:00:00` completed successfully:
+  `manual__prodbackfill20261119full01` — validate, Bronze, Silver, Gold and
+  candidate verification all **success**.
+- Candidate ref
+  `gold_prod_backfill_prodbackfill20261119full01` is a `BRANCH` at hash
+  `0a2ae6cb10d44b1508d8f212dceccbbe9f1a70fe8b2e269c58de26c427eb74bd`.
+  Gold report is candidate-only (`stable_ref=null`), seven outputs have
+  `readback_status=PASS` and `consistency_status=PASS`; row counts include
+  `fact_orders=26714`, `fact_order_items=80318`, `fact_payments=33768`, and
+  `fact_shipments=24596`.
+- Production location evidence is present under the MinIO prefix
+  `lakehouse/gold_run_20261112_gold_06/`; no stable publish/cutover was done.
+- Restored runtime configuration: `NESSIE_REF=gold_prod_current`,
+  `HISTORICAL_BACKFILL_WRITE_APPROVED=0`, `HISTORICAL_BACKFILL_MODE=DRY_RUN`.
+
+### QA gate
+
+Independent QA round 1 returned FAIL for two HIGH ordering/default issues.
+Those were corrected: the operator default base ref is now `main`, and the
+production namespace is validated before Nessie branch bootstrap/client
+creation. Round 2 independent QA returned **PASS** with focused tests
+`72 passed`, compileall and diff-check passed. The `/tests/` ignored finding is
+accepted because the user explicitly chose not to commit the test folder.
+
+Stable ref remains at the rollback baseline hash
+`761c847646be22d5096fc62a71f9bfe6d9c44c6de7389cfc87ba88538803a4ad`; the next
+action after QA is a separate explicit approval gate for any stable promotion.
+
+## Stable promotion — approved (2026-11-19)
+
+- User explicitly approved promotion after independent QA PASS.
+- Guarded CAS promotion executed only after verifying stable hash
+  `761c847646be22d5096fc62a71f9bfe6d9c44c6de7389cfc87ba88538803a4ad` and
+  candidate hash `0a2ae6cb10d44b1508d8f212dceccbbe9f1a70fe8b2e269c58de26c427eb74bd`.
+- Nessie result: `APPLY_CAS`; `gold_prod_current` read-back equals
+  `0a2ae6cb10d44b1508d8f212dceccbbe9f1a70fe8b2e269c58de26c427eb74bd`.
+- No object deletion, checkpoint reset, rollback, cleanup, commit or push was
+  performed. The next operational step is normal incremental Production Write
+  using the newly promoted stable ref.

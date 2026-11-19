@@ -55,8 +55,16 @@ def _extract_all(conn, capture_end, batch_size):
     extracted = {}
     for table in PARENT_FIRST_ORDER:
         rows, columns, cursor = [], (), None
+        parent_closure = table in ("customers", "products")
         while True:
-            page = extract_page(conn, table, capture_end, batch_size=batch_size, after=cursor)
+            page = extract_page(
+                conn,
+                table,
+                capture_end,
+                batch_size=batch_size,
+                after=cursor,
+                parent_closure=parent_closure,
+            )
             columns = page.columns
             rows.extend(page.rows)
             if page.next_cursor is None:

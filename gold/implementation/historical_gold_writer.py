@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Callable, Mapping
 
 from ingestion.historical.config import HistoricalBackfillConfig, production_environment
+from common.storage_layout import ProductionGoldScope, PRODUCTION_BUCKET
 from gold.implementation.dimensional.contracts import WRITE_ORDER
 from gold.implementation.dimensional.lineage import (
     build_dimensional_lineage_from_artifacts,
@@ -41,6 +42,14 @@ def _require_candidate_environment(config: HistoricalBackfillConfig, environ=Non
 def _default_runtime_factory(plan, environ):
     """Construct clients only after all historical production guards pass."""
     try:
+        namespace = environ.get("GOLD_TARGET_NAMESPACE")
+        production_runtime = environ.get("BRONZE_BUCKET") == PRODUCTION_BUCKET and environ.get("LAKEHOUSE_STORAGE_ENV") == "production"
+        if production_runtime and namespace != "gold_run_20261112_gold_06":
+            raise HistoricalGoldWriterUnavailable("historical Gold requires the certified production namespace")
+        namespace = namespace or "gold"
+
+        # Validate the complete target identity before creating any external
+        # client or bootstrapping a candidate Nessie branch.
         nessie = NessieRestAdapter(environ["NESSIE_URI"])
         ensure_candidate_branch(
             nessie,
@@ -50,15 +59,14 @@ def _default_runtime_factory(plan, environ):
         from common.minio import configure_s3a, create_minio_client
         from pyspark.sql import SparkSession
 
+        scope = ProductionGoldScope(PRODUCTION_BUCKET, plan["candidate_ref"], namespace)
         builder = SparkSession.builder.appName("HistoricalGoldCandidateWriter")
-        warehouse = environ.get("ICEBERG_WAREHOUSE")
-        if warehouse:
-            builder = builder.config("spark.sql.catalog.lakehouse.warehouse", warehouse)
+        builder = builder.config("spark.sql.catalog.lakehouse.warehouse", scope.warehouse)
         builder = builder.config("spark.sql.catalog.lakehouse.ref", plan["candidate_ref"])
         spark = builder.getOrCreate()
         configure_s3a(spark)
         client = create_minio_client()
-        return {"spark": spark, "client": client, "nessie": nessie}
+        return {"spark": spark, "client": client, "nessie": nessie, "scope": scope}
     except HistoricalGoldWriterUnavailable:
         raise
     except Exception as exc:
@@ -116,6 +124,10 @@ def run_historical_gold_candidate(
     if not isinstance(runtime, Mapping) or runtime.get("spark") is None or runtime.get("client") is None:
         raise HistoricalGoldWriterUnavailable("runtime factory did not provide Spark and MinIO clients")
     spark, client = runtime["spark"], runtime["client"]
+    scope = runtime.get("scope")
+    if scope is None:
+        namespace = values.get("GOLD_TARGET_NAMESPACE", "gold_run_20261112_gold_06")
+        scope = ProductionGoldScope(values["BRONZE_BUCKET"], config.candidate_ref, namespace)
     try:
         result = run_dimensional_graph(
             spark, client, values["BRONZE_BUCKET"], lineage,
@@ -124,10 +136,10 @@ def run_historical_gold_candidate(
             configured_date_start=plan["capture_start"][:10],
             configured_date_end=plan["capture_end"][:10],
             mode=WRITE,
-            scope=None,
+            scope=scope,
             captured_at=datetime.now(timezone.utc).isoformat(),
         )
-        verification = verify_completed_graph(result, client, values["BRONZE_BUCKET"])
+        verification = verify_completed_graph(result, client, values["BRONZE_BUCKET"], scope=scope)
         if verification.get("status") != "VERIFIED":
             raise HistoricalGoldWriterUnavailable("physical Gold graph verification did not pass")
         outputs = _physical_outputs(result)

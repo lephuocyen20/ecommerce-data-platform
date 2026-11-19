@@ -261,6 +261,11 @@ def create_historical_spark_operator(*, task_id, project_path, stage, input_argu
         arguments=(),
         extra_environment={
             "HISTORICAL_BACKFILL_WRITE_APPROVED": os.environ.get("HISTORICAL_BACKFILL_WRITE_APPROVED", ""),
+            "BRONZE_BUCKET": os.environ.get("BRONZE_BUCKET", PRODUCTION_BUCKET),
+            "LAKEHOUSE_STORAGE_ENV": os.environ.get("LAKEHOUSE_STORAGE_ENV", "production"),
+            "NESSIE_URI": os.environ.get("NESSIE_URI", "http://nessie:19120/api/v2"),
+            "GOLD_TARGET_NAMESPACE": os.environ.get("GOLD_TARGET_NAMESPACE", ""),
+            "HISTORICAL_GOLD_BASE_REF": os.environ.get("HISTORICAL_GOLD_BASE_REF", "main"),
             "GOLD_DIMENSIONAL_MODE": os.environ.get("GOLD_DIMENSIONAL_MODE", "DRY_RUN"),
             "GOLD_DIMENSIONAL_ENABLED": os.environ.get("GOLD_DIMENSIONAL_ENABLED", "false"),
             "GOLD_DIMENSIONAL_WRITE_ENABLED": os.environ.get("GOLD_DIMENSIONAL_WRITE_ENABLED", "false"),
@@ -336,6 +341,12 @@ def create_gold_dimensional_operator(*, project_path, mode="DRY_RUN"):
             "LAKEHOUSE_E2E_RUN_ID": scope.run_id,
             "LAKEHOUSE_E2E_PREFIX": scope.prefix,
             "GOLD_TARGET_NAMESPACE": target_namespace,
+        })
+    elif bucket == PRODUCTION_BUCKET:
+        extra_environment.update({
+            "GOLD_CANDIDATE_REF": os.environ.get("GOLD_CANDIDATE_REF", ""),
+            "GOLD_TARGET_CATALOG": os.environ.get("GOLD_TARGET_CATALOG", ""),
+            "GOLD_TARGET_NAMESPACE": os.environ.get("GOLD_TARGET_NAMESPACE", ""),
         })
     return create_spark_submit_operator(
         task_id="gold_dimensional_write",
